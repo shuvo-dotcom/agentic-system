@@ -1,0 +1,37 @@
+{
+  "time_period": [
+    "I'd like to analyze this for the next 5 years",
+    "Can we look at a 10-year projection?",
+    "Let's do 3 years to start with",
+    "I'm thinking about 7 years of data",
+    "Maybe 15 years for a long-term view"
+  ],
+  "parameter": [
+    "I don't have exact numbers, can you estimate?",
+    "Let me check my notes... I think it's around 2.5 MW",
+    "I'm not sure about that parameter",
+    "Can you use industry averages?",
+    "I have some rough estimates if that helps"
+  ],
+  "clarification": [
+    "I'm not sure I understand the question",
+    "Can you rephrase that?",
+    "I think I know what you mean, but can you confirm?",
+    "Let me think about this...",
+    "I need more context to answer properly"
+  ],
+  "forecasting": [
+    "I'd like to see conservative estimates",
+    "Show me optimistic and pessimistic scenarios",
+    "Use historical trends to project forward",
+    "I'm interested in best-case scenarios",
+    "Can you show me different growth rates?"
+  ],
+  "general": [
+    "That sounds good to me",
+    "I'm not sure, what do you recommend?",
+    "Let's proceed with that",
+    "I need to think about this",
+    "Can you explain more about this?"
+  ]
+} 

@@ -1,0 +1,14 @@
+{
+  "int": [
+    "how many years", "number of years", "years would you like", "enter a year", "years to forecast", "number of periods"
+  ],
+  "float": [
+    "rate", "percentage", "cost", "factor", "value for .*cost", "value for .*rate", "discount", "efficiency", "capacity factor"
+  ],
+  "yes/no": [
+    "yes/no", "do you want", "would you like", "confirm", "use default", "use llm-suggested defaults"
+  ],
+  "string": [
+    "name", "description", "label", "enter a description", "type of", "specify"
+  ]
+} 

@@ -1,0 +1,18 @@
+[
+  {"pattern": "[\"']?monthly from ([a-zA-Z]+) (\\d{4}) to ([a-zA-Z]+) (\\d{4})[\"']?", "granularity": "months"},
+  {"pattern": "[\"']?annually from (\\d{4}) to (\\d{4})[\"']?", "granularity": "years"},
+  {"pattern": "[\"']?from (\\d{4}) to (\\d{4})[\"']?", "granularity": "years"},
+  {"pattern": "[\"']?monthly from (\\d{4}) to (\\d{4})[\"']?", "granularity": "months"},
+  {"pattern": "[\"']?for each month from ([a-zA-Z]+) (\\d{4}) to ([a-zA-Z]+) (\\d{4})[\"']?", "granularity": "months"},
+  {"pattern": "[\"']?for each year from (\\d{4}) to (\\d{4})[\"']?", "granularity": "years"},
+  {"pattern": "[\"']?for each month from (\\d{4}) to (\\d{4})[\"']?", "granularity": "months"},
+  {"pattern": "[\"']?for each year from ([a-zA-Z]+) (\\d{4}) to ([a-zA-Z]+) (\\d{4})[\"']?", "granularity": "years"},
+  {"pattern": "[\"']?with monthly granularity from ([a-zA-Z]+) (\\d{4}) to ([a-zA-Z]+) (\\d{4})[\"']?", "granularity": "months"},
+  {"pattern": "[\"']?with monthly granularity from (\\d{4}) to (\\d{4})[\"']?", "granularity": "months"},
+  {"pattern": "[\"']?for each month between ([a-zA-Z]+) (\\d{4}) and ([a-zA-Z]+) (\\d{4})[\"']?", "granularity": "months"},
+  {"pattern": "[\"']?for each year between (\\d{4}) and (\\d{4})[\"']?", "granularity": "years"},
+  {"pattern": "[\"']?from ([a-zA-Z]+) (\\d{4}) through ([a-zA-Z]+) (\\d{4})[\"']?", "granularity": "months"},
+  {"pattern": "[\"']?from (\\d{4}) through (\\d{4})[\"']?", "granularity": "years"},
+  {"pattern": "analyze .* for each month from ([a-zA-Z]+) (\\d{4}) to ([a-zA-Z]+) (\\d{4})", "granularity": "months"},
+  {"pattern": "analyze .* for each year from (\\d{4}) to (\\d{4})", "granularity": "years"}
+] 

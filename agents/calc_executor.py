@@ -11,6 +11,13 @@ from datetime import datetime
 import traceback
 import sys
 from io import StringIO
+import re
+import scipy
+import scipy.optimize
+import statistics
+import sympy
+import random
+import logging
 
 from core.simple_base_agent import SimpleBaseAgent
 
@@ -51,11 +58,16 @@ class CalcExecutor(SimpleBaseAgent):
             'math': math,
             'np': np,
             'pd': pd,
-            'datetime': datetime
+            'datetime': datetime,
+            'scipy': scipy,
+            'optimize': scipy.optimize,
+            'statistics': statistics,
+            'sympy': sympy,
+            'random': random
         }
     
     def execute_formula(self, formula: str, parameters: Dict[str, Union[float, List[float]]],
-                       formula_type: str = "standard") -> Dict[str, Any]:
+                       formula_type: str = "standard", session_id: int = None, agent_name: str = 'CalcExecutor') -> Dict[str, Any]:
         """
         Execute a mathematical formula with given parameters.
         
@@ -63,12 +75,21 @@ class CalcExecutor(SimpleBaseAgent):
             formula: Mathematical formula as string
             parameters: Dictionary of parameter values
             formula_type: Type of formula (standard, time_series, iterative)
-        
+            session_id: Session identifier for logging
+            agent_name: Name of the agent for logging
         Returns:
             Calculation results and logs
         """
+        # Add session_id and agent_name to all log records
+        class ContextFilter(logging.Filter):
+            def filter(self, record):
+                record.session_id = session_id
+                record.agent_name = agent_name
+                return True
+        self.logger.addFilter(ContextFilter())
+
         try:
-            self.logger.info(f"Executing formula: {formula[:50]}...")
+            self.logger.info(f"Executing formula: {formula[:50]}...", extra={'session_id': session_id, 'agent_name': agent_name})
             
             # Prepare execution environment
             execution_env = self.safe_globals.copy()
@@ -81,13 +102,41 @@ class CalcExecutor(SimpleBaseAgent):
             else:
                 result = self._execute_standard_formula(formula, parameters, execution_env)
             
-            return {
-                "success": True,
-                "result": result,
-                "formula": formula,
-                "parameters_used": parameters,
-                "formula_type": formula_type
-            }
+            # After formula execution, log accept or error/fallback as appropriate
+            try:
+                self.log_decision_point(
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    step_id='execute_formula',
+                    parent_step_id=None,
+                    decision_type='accept',
+                    reason='Formula executed successfully',
+                    result_summary=str(result),
+                    confidence=None,
+                    parameters=parameters,
+                    llm_rationale=None
+                )
+                return {
+                    "success": True,
+                    "result": result,
+                    "formula": formula,
+                    "parameters_used": parameters,
+                    "formula_type": formula_type
+                }
+            except Exception as e:
+                self.log_decision_point(
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    step_id='execute_formula_error',
+                    parent_step_id=None,
+                    decision_type='retry',
+                    reason=f'Formula execution failed: {str(e)}',
+                    result_summary=None,
+                    confidence=None,
+                    parameters=parameters,
+                    llm_rationale=None
+                )
+                return {"error": f"Formula execution failed: {str(e)}"}
             
         except Exception as e:
             return {"error": f"Formula execution failed: {str(e)}"}
@@ -152,6 +201,36 @@ class CalcExecutor(SimpleBaseAgent):
         except Exception as e:
             return {"error": f"Input validation failed: {str(e)}"}
     
+    def log_decision_point(self, session_id, agent_name, step_id, parent_step_id, decision_type, reason, result_summary, sub_prompt=None, stage='decision_point', confidence=None, parameters=None, llm_rationale=None, extra_context=None):
+        log_data = {
+            'session_id': session_id,
+            'agent_name': agent_name,
+            'stage': stage,
+            'step_id': step_id,
+            'parent_step_id': parent_step_id,
+            'decision_type': decision_type,
+            'decision_reason': reason,
+            'decision_result': result_summary,
+            'sub_prompt': sub_prompt,
+            'confidence': confidence,
+            'parameters': parameters,
+            'llm_rationale': llm_rationale,
+        }
+        if extra_context:
+            log_data.update(extra_context)
+        self.logger.info(
+            f"Decision: {decision_type} | Reason: {reason} | Result: {result_summary} | Confidence: {confidence} | Parameters: {parameters} | LLM Rationale: {llm_rationale}",
+            extra=log_data
+        )
+    
+    def _strip_unnecessary_imports(self, code: str) -> str:
+        """
+        Remove all import statements from the code string.
+        Only pre-imported modules are available in the execution environment.
+        """
+        # Remove any line that starts with 'import' or 'from ... import ...'
+        return re.sub(r"^\s*(import\s+\w+|from\s+\w+(?:\.\w+)*\s+import\s+.*)$", "", code, flags=re.MULTILINE)
+    
     def run_python_code(self, code: str, inputs: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Execute Python code in a safe environment.
@@ -164,6 +243,8 @@ class CalcExecutor(SimpleBaseAgent):
             Execution results
         """
         try:
+            # Strip all import statements
+            code = self._strip_unnecessary_imports(code)
             # Prepare execution environment
             execution_env = self.safe_globals.copy()
             if inputs:
@@ -179,25 +260,33 @@ class CalcExecutor(SimpleBaseAgent):
                 compiled_code = compile(code, 
                                         '<string>', 
                                         'exec')
-                exec(compiled_code, execution_env)
-                
+                try:
+                    exec(compiled_code, execution_env)
+                except NameError as ne:
+                    # Check if the error is due to a missing module
+                    missing = str(ne).split("'")
+                    if len(missing) > 1:
+                        missing_mod = missing[1]
+                        available_mods = ', '.join([k for k in self.safe_globals.keys() if k != '__builtins__'])
+                        return {
+                            "error": f"Module '{missing_mod}' is not available. Only these modules are allowed: {available_mods}.",
+                            "code_executed": code
+                        }
+                    else:
+                        raise
                 # Get output
                 output = captured_output.getvalue()
-                
                 # Extract result variables (variables that don't start with _)
                 results = {k: v for k, v in execution_env.items() 
                           if not k.startswith('_') and k not in self.safe_globals}
-                
                 return {
                     "success": True,
                     "results": results,
                     "output": output,
                     "code_executed": code
                 }
-                
             finally:
                 sys.stdout = old_stdout
-            
         except Exception as e:
             return {"error": f"Code execution failed: {str(e)}", "traceback": traceback.format_exc()}
     
@@ -377,7 +466,7 @@ class CalcExecutor(SimpleBaseAgent):
             operation = input_data.get("operation")
             
             if operation == "execute_formula":
-                return self.execute_formula(input_data.get("formula"), input_data.get("parameters"), input_data.get("formula_type", "standard"))
+                return self.execute_formula(input_data.get("formula"), input_data.get("parameters"), input_data.get("formula_type", "standard"), input_data.get("session_id"), input_data.get("agent_name", "CalcExecutor"))
             elif operation == "validate_inputs":
                 return self.validate_inputs(input_data.get("parameters"), input_data.get("requirements"))
             elif operation == "run_python_code":
@@ -414,4 +503,40 @@ class CalcExecutor(SimpleBaseAgent):
         }
 
 
+if __name__ == "__main__":
+    import argparse
+    import json
+    parser = argparse.ArgumentParser(description="Run CalcExecutor independently.")
+    parser.add_argument('--code', type=str, help='Python code to execute')
+    parser.add_argument('--inputs', type=str, help='JSON string or path to JSON file with input variables', default=None)
+    parser.add_argument('--json', type=str, help='Path to a JSON file with {"code": ..., "inputs": ...}')
+    args = parser.parse_args()
 
+    # Load code and inputs
+    if args.json:
+        with open(args.json, 'r') as f:
+            data = json.load(f)
+        code = data.get('code')
+        inputs = data.get('inputs', None)
+    else:
+        code = args.code
+        inputs = args.inputs
+        if inputs:
+            try:
+                # Try to load as JSON string
+                if inputs.endswith('.json'):
+                    with open(inputs, 'r') as f:
+                        inputs = json.load(f)
+                else:
+                    inputs = json.loads(inputs)
+            except Exception:
+                print("Failed to parse inputs. Provide a JSON string or path to a JSON file.")
+                inputs = None
+
+    if not code:
+        print("You must provide code to execute via --code or --json.")
+        exit(1)
+
+    agent = CalcExecutor()
+    result = agent.run_python_code(code, inputs)
+    print(json.dumps(result, indent=2, default=str))

@@ -1,0 +1,14 @@
+{
+  "mongo_uri": "mongodb+srv://test_toconnect:BPhKfz73xEcHw5lz@cluster0.d5dfq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
+  "mongo_db": "logs",
+  "mongo_collection": "log",
+  "qdrant_url": "http://localhost:6333",
+  "qdrant_collection": "agent_logs",
+  "openai_api_key": "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",
+  "tree_settings": {
+    "max_depth": 10,
+    "default_batch_size": 16,
+    "enable_depth_tracking": true,
+    "enable_relationship_tracking": true
+  }
+}

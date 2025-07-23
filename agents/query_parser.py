@@ -2,18 +2,23 @@
 import re
 from typing import Dict, Any, List
 from core.simple_base_agent import SimpleBaseAgent
+from openai import OpenAI
+from config.settings import OPENAI_API_KEY
+import json
 
 class QueryParser(SimpleBaseAgent):
     """
     A specialist agent for parsing natural language queries and extracting
     relevant parameters, including numerical values, units, and entities.
+    Now uses an LLM for dynamic extraction.
     """
     def __init__(self):
-        super().__init__("QueryParser", "Parses natural language queries to extract parameters.")
+        super().__init__("QueryParser", "Parses natural language queries to extract parameters using LLM.")
+        self.client = OpenAI(api_key=OPENAI_API_KEY)
 
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Processes the input query to extract parameters.
+        Processes the input query to extract parameters using an LLM.
 
         Args:
             input_data: A dictionary containing the 'query' string.
@@ -21,56 +26,53 @@ class QueryParser(SimpleBaseAgent):
         Returns:
             A dictionary with extracted 'parameters' and a 'success' status.
         """
-        query = input_data.get("query", "").lower()
+        query = input_data.get("query", "")
         self.logger.info(f"QueryParser processing query: {query[:100]}...")
 
-        extracted_params = {}
-        success = True
-        error_message = None
-
         try:
-            # General numerical extraction (e.g., $100, 20%, 5 years)
-            numbers = re.findall(r'\b(\d+\.?\d*)\s*(?:%|/kw|/kwh|/year|years|mw|mwh|gwh|twh|tonnes|dollars|\$)?\b', query)
-            # This is a very basic extraction. More sophisticated NLP would be needed for complex cases.
-            # For now, we'll focus on specific patterns for known metrics.
-
-            # Specific parameter extraction for LCOE-related terms
-            if "capex" in query:
-                match = re.search(r"capex(?: of)?(?: \$)?([\d\.,]+)", query)
-                if match: extracted_params["CAPEX"] = float(match.group(1).replace(",", ""))
-
-            if "opex" in query:
-                # OPEX can be per year or total, assuming per year for now
-                match = re.search(r"opex(?: of)?(?: \$)?([\d\.,]+)(?:/kw/year)?", query)
-                if match: extracted_params["OPEX_t"] = float(match.group(1).replace(",", ""))
-
-            if "capacity factor" in query:
-                match = re.search(r"capacity factor(?: of)?(?: is)?\s*([\d\.]+)(?:%|percent)?", query)
-                if match: extracted_params["capacity_factor"] = float(match.group(1)) / 100.0
-
-            if "discount rate" in query:
-                match = re.search(r"discount rate(?: of)?(?: is)?\s*([\d\.]+)(?:%|percent)?", query)
-                if match: extracted_params["discount_rate"] = float(match.group(1)) / 100.0
-
-            if "lifetime" in query:
-                match = re.search(r"([\d\.]+)\s*(?:year|years)\s*lifetime", query)
-                if match: extracted_params["n"] = int(float(match.group(1)))
-
-            # For energy_output_t, it's usually derived or looked up, not directly in query
-            # This will be handled by DataHarvester or integration with Plexos data
-
-            self.logger.info(f"Extracted parameters: {extracted_params}")
-
+            prompt = f"""You are an expert data extraction agent. Given the following user query, extract all relevant parameters (names, values, units, and context) as a JSON object. For each parameter, include its name, value, unit (if any), and a short context or description if possible. If a value contains a currency symbol or other non-numeric characters (e.g., '$2000/kW'), extract the numeric value (e.g., 2000) and provide the unit (e.g., '/kW'). Always provide the value as a number if possible. Only return the JSON object, do not include any other text.\n\nQuery: \"{query}\"\n\nExample output:\n{{\n  \"parameters\": {{\n    \"CAPEX\": {{\"value\": 2000, \"unit\": \"$/kW\", \"description\": \"Capital expenditure\"}},\n    \"OPEX_t\": {{\"value\": 50, \"unit\": \"$/kW/year\", \"description\": \"Operating expenditure per year\"}},\n    \"capacity_factor\": {{\"value\": 0.35, \"unit\": \"fraction\", \"description\": \"Capacity factor\"}},\n    \"discount_rate\": {{\"value\": 0.08, \"unit\": \"fraction\", \"description\": \"Discount rate\"}},\n    \"n\": {{\"value\": 20, \"unit\": \"years\", \"description\": \"Project lifetime\"}}\n  }}\n}}\n"""
+            response = self.client.chat.completions.create(
+                model="gpt-4.1-mini",
+                response_format={"type": "json_object"},
+                messages=[{"role": "user", "content": prompt}]
+            )
+            content = response.choices[0].message.content
+            parsed_content = json.loads(content) # type: ignore
+            parameters = parsed_content.get("parameters", {})
+            # --- Post-processing: clean all parameter values ---
+            def clean_value(val):
+                if isinstance(val, str):
+                    # Remove $ and commas, extract first float or int
+                    import re
+                    match = re.search(r"[-+]?[0-9]*\.?[0-9]+", val.replace(",", ""))
+                    if match:
+                        return float(match.group())
+                    return val
+                return val
+            for param in parameters.values():
+                if isinstance(param, dict) and "value" in param:
+                    param["value"] = clean_value(param["value"])
+            return {"success": True, "parameters": parameters, "error": None}
         except Exception as e:
             self.logger.error(f"Error during query parsing: {str(e)}")
-            success = False
-            error_message = str(e)
+            return {"success": False, "parameters": {}, "error": str(e)}
 
-        return {
-            "success": success,
-            "parameters": extracted_params,
-            "error": error_message
-        }
+
+if __name__ == "__main__":
+    import argparse
+    import json
+    import asyncio
+    parser = argparse.ArgumentParser(description="Run QueryParser independently.")
+    parser.add_argument('--query', type=str, help='Natural language query to parse')
+    args = parser.parse_args()
+
+    if not args.query:
+        print("You must provide a query string via --query.")
+        exit(1)
+
+    agent = QueryParser()
+    result = asyncio.run(agent.process({"query": args.query}))
+    print(json.dumps(result, indent=2, default=str))
 
 
 

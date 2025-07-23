@@ -1,0 +1,424 @@
+import logging
+from typing import List, Dict, Any, Optional
+from agents.interaction_agent.prompt_decomposer import PromptDecomposerAgent
+from agents.interaction_agent.human_simulator import HumanSimulator
+from agents.time_series_agent.time_series_agent import DynamicTimeSeriesAgent
+from agents.interaction_agent.prompt_type_detection_agent import PromptTypeDetectionAgent
+from agents.pinpoint_value_agent import PinpointValueAgent
+from config.settings import OPENAI_API_KEY, DELETE_LOG_FILE_AFTER_UPLOAD
+import re
+import os
+import time
+from agents.log_agent.log_handler import LogHandler
+from agents.log_agent.config import get_log_agent_config
+from datetime import datetime
+import json
+
+# Type patterns for dynamic detection (copied from previous integration logic)
+TYPE_PATTERNS = {
+    "int": [
+        "how many years", "number of years", "years would you like", "enter a year", "years to forecast", "number of periods"
+    ],
+    "float": [
+        "rate", "percentage", "cost", "factor", "value for .*cost", "value for .*rate", "discount", "efficiency", "capacity factor"
+    ],
+    "yes/no": [
+        "yes/no", "do you want", "would you like", "confirm", "use default", "use llm-suggested defaults"
+    ],
+    "string": [
+        "name", "description", "label", "enter a description", "type of", "specify"
+    ]
+}
+
+def detect_type_from_prompt(prompt):
+    for type_name, patterns in TYPE_PATTERNS.items():
+        for pattern in patterns:
+            if re.search(pattern, prompt, re.IGNORECASE):
+                return type_name
+    return None
+
+def serialize_result(result):
+    """Recursively serialize result object to dictionary for MongoDB storage"""
+    if isinstance(result, dict):
+        return {k: serialize_result(v) for k, v in result.items()}
+    elif isinstance(result, list):
+        return [serialize_result(v) for v in result]
+    elif hasattr(result, 'to_dict'):
+        return serialize_result(result.to_dict())
+    elif hasattr(result, '__dict__'):
+        return {k: serialize_result(v) for k, v in result.__dict__.items()}
+    else:
+        return result
+
+class OrchestratorAgent:
+    """
+    High-level agent that orchestrates multi-entity, multi-metric, multi-time analysis.
+    Decomposes complex prompts, invokes the interaction agent and time series agent for each atomic sub-prompt,
+    aggregates results, and returns a comprehensive answer (table + summary).
+    """
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or OPENAI_API_KEY
+        self.decomposer = PromptDecomposerAgent(api_key=self.api_key)
+        self.interaction_agent = HumanSimulator(api_key=self.api_key)
+        self.time_series_agent = DynamicTimeSeriesAgent()
+        self.pinpoint_value_agent = PinpointValueAgent(api_key=self.api_key)
+        self.prompt_type_detector = PromptTypeDetectionAgent()
+        self.logger = logging.getLogger(__name__)
+
+    def log_decision_point(self, session_id, agent_name, step_id, parent_step_id, decision_type, reason, result_summary, sub_prompt=None, stage='decision_point', confidence=None, parameters=None, llm_rationale=None, extra_context=None, depth=None, parent_id=None):
+        log_data = {
+            'session_id': session_id,
+            'agent_name': agent_name,
+            'stage': stage,
+            'step_id': step_id,
+            'parent_step_id': parent_step_id,
+            'decision_type': decision_type,
+            'decision_reason': reason,
+            'decision_result': result_summary,
+            'sub_prompt': sub_prompt,
+            'confidence': confidence,
+            'parameters': parameters,
+            'llm_rationale': llm_rationale,
+        }
+        if depth is not None:
+            log_data['depth'] = depth
+        if parent_id is not None:
+            log_data['parent_id'] = parent_id
+        if extra_context:
+            log_data.update(extra_context)
+        self.logger.info(
+            f"Decision: {decision_type} | Reason: {reason} | Result: {result_summary} | Confidence: {confidence} | Parameters: {parameters} | LLM Rationale: {llm_rationale}",
+            extra=log_data
+        )
+
+    def log_agent_call(self, call_tree, node_id, agent_name, operation, parent_id, parameters=None, result=None):
+        call_tree[node_id] = {
+            'agent_name': agent_name,
+            'operation': operation,
+            'parent_id': parent_id,
+            'parameters': parameters,
+            'result': result
+        }
+
+    def log_decision_node_to_tree(self, call_tree, node_id, agent_name, decision_type, parent_id, reason, result_summary, sub_prompt=None, stage='decision_point', confidence=None, parameters=None, llm_rationale=None):
+        call_tree[node_id] = {
+            'agent_name': agent_name,
+            'operation': f'decision_{decision_type}',
+            'parent_id': parent_id,
+            'parameters': parameters,
+            'result': result_summary,
+            'decision_type': decision_type,
+            'reason': reason,
+            'sub_prompt': sub_prompt,
+            'stage': stage,
+            'confidence': confidence,
+            'llm_rationale': llm_rationale
+        }
+
+    async def analyze(self, prompt: str) -> Dict[str, Any]:
+        """
+        Orchestrate the full analysis for a complex prompt.
+        Returns a dict with all sub-results and a summary table.
+        """
+        # Set up session log file
+        session_id = int(time.time())
+        agent_name = 'OrchestratorAgent'
+        log_dir = 'logs'
+        os.makedirs(log_dir, exist_ok=True)
+        log_file_path = os.path.join(log_dir, f'session_{session_id}.log')
+        print(f"[DEBUG] Log file path: {log_file_path}")
+        print(f"[DEBUG] Session ID: {session_id}")
+        file_handler = logging.FileHandler(log_file_path)
+        # Add SafeFormatter to handle missing session_id/agent_name
+        class SafeFormatter(logging.Formatter):
+            def format(self, record):
+                if not hasattr(record, 'session_id'):
+                    record.session_id = 'N/A'
+                if not hasattr(record, 'agent_name'):
+                    record.agent_name = 'N/A'
+                return super().format(record)
+        formatter = SafeFormatter('%(asctime)s - %(name)s - %(levelname)s - [session_id:%(session_id)s] [agent:%(agent_name)s] [step_id:%(step_id)s] [parent_id:%(parent_id)s] - %(message)s')
+        file_handler.setFormatter(formatter)
+        logger = logging.getLogger(__name__)
+        logger.addHandler(file_handler)
+        logger.setLevel(logging.INFO)
+
+        # Add session_id and agent_name to all log records
+        class ContextFilter(logging.Filter):
+            def filter(self, record):
+                record.session_id = session_id
+                record.agent_name = agent_name
+                return True
+
+        class DefaultFieldFilter(logging.Filter):
+            def filter(self, record):
+                if not hasattr(record, 'step_id'):
+                    record.step_id = 'N/A'
+                if not hasattr(record, 'parent_id'):
+                    record.parent_id = 'N/A'
+                return True
+
+        logger.addFilter(ContextFilter())
+        logger.addFilter(DefaultFieldFilter())
+        print(f"[DEBUG] ContextFilter and DefaultFieldFilter added: session_id={session_id}, agent_name={agent_name}")
+
+        # Initialize log handler and mongo_log_handler at the start
+        config = get_log_agent_config()
+        log_handler = LogHandler(
+            mongo_uri=config.get('mongo_uri', ''),
+            mongo_db=config.get('mongo_db', ''),
+            mongo_collection=config.get('mongo_collection', ''),
+            qdrant_url=config['qdrant_url'],
+            openai_api_key=config['openai_api_key'],
+            qdrant_collection=config.get('qdrant_collection', 'agent_logs')
+        )
+        mongo_log_handler = log_handler.mongo_logs
+
+        step_id = 0
+        call_tree = {}
+        node_counter = 0
+        node_ids = {}  # label -> step_id mapping for parent tracking
+        def get_node_id(label):
+            nonlocal node_counter
+            node_counter += 1
+            node_id = f'{label}_{node_counter}'
+            node_ids[label] = node_id
+            return node_id
+
+        self.logger.info(f"OrchestratorAgent received prompt: {prompt}", extra={'session_id': session_id, 'agent_name': agent_name, 'stage': 'prompt_received', 'step_id': 'root', 'parent_step_id': '', 'parent_id': ''})
+        sub_prompts = self.decomposer.decompose(prompt)
+        results = []
+        table = []
+        parent_id = None
+        last_decision_node_id = None
+        print(f"[DEBUG] About to start sub-prompt loop. sub_prompts={sub_prompts}")
+        for sub in sub_prompts:
+            print(f"[DEBUG] Processing sub-prompt: {sub}")
+            step_id += 1
+            # For the first sub-prompt, parent_id is None; for others, parent_id is last_decision_node_id
+            sub_prompt_parent_id = last_decision_node_id if last_decision_node_id else None
+            sub_prompt_node_id = get_node_id('subprompt')
+            
+            # Detect prompt type
+            prompt_type = self.prompt_type_detector.detect_type(sub)
+            self.logger.info(f"Detected prompt type '{prompt_type}' for sub-prompt: {sub}")
+
+            self.logger.info(f"OrchestratorAgent running sub-prompt: {sub}", extra={'session_id': session_id, 'agent_name': agent_name, 'stage': 'run_sub_prompt', 'step_id': sub_prompt_node_id, 'parent_step_id': str(sub_prompt_parent_id) if sub_prompt_parent_id else '', 'parent_id': str(sub_prompt_parent_id) if sub_prompt_parent_id else '', 'prompt_type': prompt_type})
+            self.log_agent_call(call_tree, sub_prompt_node_id, agent_name, 'run_sub_prompt', str(sub_prompt_parent_id) if sub_prompt_parent_id else '', parameters={'sub_prompt': sub})
+            import builtins
+            original_input = builtins.input
+            def simulated_input(agent_prompt):
+                expected_type = detect_type_from_prompt(agent_prompt)
+                response_obj = self.interaction_agent.generate_response(agent_prompt)
+                response_text = response_obj.response
+                if expected_type == "int":
+                    match = re.search(r"\b\d+\b", response_text)
+                    if match:
+                        return match.group(0)
+                elif expected_type == "float":
+                    match = re.search(r"\b\d+\.\d+\b|\b\d+\b", response_text)
+                    if match:
+                        return match.group(0)
+                elif expected_type == "yes/no":
+                    match = re.search(r"yes|no", response_text, re.IGNORECASE)
+                    if match:
+                        return match.group(0).lower()
+                return response_text
+            builtins.input = simulated_input
+            try:
+                # Track sub-agent call in tree
+                sub_agent_node_id = get_node_id('subagent')
+                self.log_agent_call(call_tree, sub_agent_node_id, 'DynamicTimeSeriesAgent', 'analyze_query', sub_prompt_node_id, parameters={'sub_prompt': sub})
+                # Log sub-agent node with correct parent_id
+                self.logger.info(
+                    f"DynamicTimeSeriesAgent analyzing sub-prompt: {sub}",
+                    extra={
+                        'session_id': session_id,
+                        'agent_name': 'DynamicTimeSeriesAgent',
+                        'stage': 'analyze_query',
+                        'step_id': sub_agent_node_id,
+                        'parent_step_id': sub_prompt_node_id,
+                        'parent_id': sub_prompt_node_id
+                    }
+                )
+                print(f"[DEBUG] Routing sub-prompt based on type: {prompt_type}")
+                if prompt_type == 'time_series':
+                    result = await self.time_series_agent.analyze_query(
+                        sub,
+                        session_id=session_id,
+                        agent_name='DynamicTimeSeriesAgent',
+                        call_tree=call_tree,
+                        get_node_id=get_node_id
+                    )
+                elif prompt_type == 'pinpoint_value':
+                    result = await self.pinpoint_value_agent.analyze_query(
+                        sub,
+                        session_id=session_id,
+                        agent_name='PinpointValueAgent',
+                        call_tree=call_tree,
+                        get_node_id=get_node_id
+                    )
+                else:
+                    # Fallback to time_series_agent for other types for now
+                    print(f"[DEBUG] Fallback to DynamicTimeSeriesAgent for prompt type: {prompt_type}")
+                    result = await self.time_series_agent.analyze_query(
+                        sub,
+                        session_id=session_id,
+                        agent_name='DynamicTimeSeriesAgent',
+                        call_tree=call_tree,
+                        get_node_id=get_node_id
+                    )
+                print(f"[DEBUG] Result from DynamicTimeSeriesAgent: {result}")
+                self.log_agent_call(call_tree, sub_agent_node_id, 'DynamicTimeSeriesAgent', 'analyze_query', sub_prompt_node_id, parameters={'sub_prompt': sub}, result=str(result))
+                results.append({"sub_prompt": sub, "result": result})
+                summary = getattr(result, 'summary', None) or (result.summary if hasattr(result, 'summary') else None)
+                if summary:
+                    table.append({"sub_prompt": sub, **summary})
+                # Log decision point and add to call_tree
+                decision_node_id = get_node_id('decision')
+                self.log_decision_point(
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    step_id=decision_node_id,
+                    parent_step_id=sub_agent_node_id,
+                    decision_type='accept',
+                    reason='Sub-agent result accepted as valid for sub-prompt',
+                    result_summary=str(summary) if summary else str(result),
+                    sub_prompt=sub,
+                    stage='decision_point',
+                    confidence=getattr(result, 'confidence', None),
+                    parameters=None,
+                    llm_rationale=None,
+                    depth=2,
+                    parent_id=sub_agent_node_id
+                )
+                self.logger.info(
+                    f"Decision: accept | Reason: Sub-agent result accepted as valid for sub-prompt | Result: {str(summary) if summary else str(result)} | Confidence: {getattr(result, 'confidence', None)} | Parameters: None | LLM Rationale: None",
+                    extra={
+                        'session_id': session_id,
+                        'agent_name': agent_name,
+                        'stage': 'decision_point',
+                        'step_id': decision_node_id,
+                        'parent_step_id': sub_agent_node_id,
+                        'parent_id': sub_agent_node_id,
+                        'decision_type': 'accept'
+                    }
+                )
+                self.log_decision_node_to_tree(
+                    call_tree,
+                    decision_node_id,
+                    agent_name,
+                    'accept',
+                    sub_prompt_node_id,
+                    'Sub-agent result accepted as valid for sub-prompt',
+                    str(summary) if summary else str(result),
+                    sub_prompt=sub,
+                    stage='decision_point',
+                    confidence=getattr(result, 'confidence', None),
+                    parameters=None,
+                    llm_rationale=None
+                )
+                mongo_log_handler.insert_one({
+                    "session_id": session_id,
+                    "agent_name": "OrchestratorAgent",
+                    "checkpoint": "sub_prompt_result",
+                    "sub_prompt": sub,
+                    "result": serialize_result(result),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "stage": "sub_prompt_result",
+                    "step_id": sub_prompt_node_id,
+                    "parent_step_id": parent_id
+                })
+            finally:
+                builtins.input = original_input
+        print(f"[DEBUG] Finished sub-prompt loop. Results: {results}")
+        result = {
+            "original_prompt": prompt,
+            "sub_prompts": sub_prompts,
+            "results": results,
+            "table": table,
+            "summary": self._summarize_table(table)
+        }
+        # Log final result to MongoDB
+        final_node_id = get_node_id('finalize')
+        mongo_log_handler.insert_one({
+            "session_id": session_id,
+            "agent_name": "OrchestratorAgent",
+            "checkpoint": "final_result",
+            "result": serialize_result(result),
+            "timestamp": datetime.utcnow().isoformat(),
+            "stage": "final_result",
+            "step_id": final_node_id,
+            "parent_step_id": None
+        })
+        self.log_decision_point(
+            session_id=session_id,
+            agent_name=agent_name,
+            step_id=final_node_id,
+            parent_step_id=None,
+            decision_type='finalize',
+            reason='All sub-prompts processed and results aggregated',
+            result_summary=str(result['summary']),
+            sub_prompt=None,
+            stage='decision_point',
+            depth=1,
+            parent_id=None
+        )
+        self.logger.info(
+            f"Decision: finalize | Reason: All sub-prompts processed and results aggregated | Result: {str(result['summary'])} | Confidence: None | Parameters: None | LLM Rationale: None",
+            extra={
+                'session_id': session_id,
+                'agent_name': agent_name,
+                'stage': 'decision_point',
+                'step_id': final_node_id,
+                'parent_step_id': last_decision_node_id if 'last_decision_node_id' in locals() else '',
+                'parent_id': last_decision_node_id if 'last_decision_node_id' in locals() else '',
+                'decision_type': 'finalize'
+            }
+        )
+        self.log_decision_node_to_tree(
+            call_tree,
+            final_node_id,
+            agent_name,
+            'finalize',
+            None,
+            'All sub-prompts processed and results aggregated',
+            str(result['summary']),
+            sub_prompt=None,
+            stage='decision_point'
+        )
+        print(f"[DEBUG] About to log final result to MongoDB and log call_tree.")
+        print(f"[DEBUG] Logging call_tree: {json.dumps(call_tree)}")
+        # Remove file handler and flush logs to Qdrant
+        print(f"[DEBUG] Removing file handler and closing log file.")
+        logger.removeHandler(file_handler)
+        file_handler.close()
+        print(f"[DEBUG] Finished logging. Log file exists: {os.path.exists(log_file_path)}")
+        print("[DEBUG] About to call upload_logs_from_file.")
+        log_handler.upload_logs_from_file(log_file_path)
+        print("[DEBUG] Called upload_logs_from_file.")
+        # Delete the log file after upload if configured
+        if DELETE_LOG_FILE_AFTER_UPLOAD:
+            try:
+                os.remove(log_file_path)
+                print(f"[DEBUG] Deleted log file: {log_file_path}")
+            except Exception as e:
+                print(f"[DEBUG] Failed to delete log file: {log_file_path}. Error: {e}")
+        return result
+
+    def _summarize_table(self, table: List[Dict[str, Any]]) -> str:
+        if not table:
+            return "No results to summarize."
+        # Simple summary: list all sub-prompts and their main result
+        lines = ["Summary of Results:"]
+        for row in table:
+            main_val = next((v for k, v in row.items() if k not in ("sub_prompt",)), None)
+            lines.append(f"- {row['sub_prompt']}: {main_val}")
+        return "\n".join(lines)
+
+if __name__ == "__main__":
+    import asyncio
+    orchestrator = OrchestratorAgent()
+    prompt = "what is the load factor of a generator that produces 0.27 GWh per day over a year and a capacity of 50 MW"
+    print("[DEBUG] Running orchestrator main entry point.")
+    asyncio.run(orchestrator.analyze(prompt))

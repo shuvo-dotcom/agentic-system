@@ -24,6 +24,8 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 TIMEOUT = int(os.getenv("TIMEOUT", "30"))
 
+DELETE_LOG_FILE_AFTER_UPLOAD = True
+
 
 
 

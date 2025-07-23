@@ -1,0 +1,5 @@
+{
+  "mongo_uri": "mongodb+srv://test_toconnect:BPhKfz73xEcHw5lz@cluster0.d5dfq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
+  "log_db_name": "logs",
+  "log_collection": "log"
+} 
