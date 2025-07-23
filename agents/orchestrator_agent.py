@@ -245,19 +245,125 @@ class OrchestratorAgent:
                 if prompt_type == 'time_series':
                     result = await self.time_series_agent.analyze_query(
                         sub,
-                        session_id=session_id,
+                        session_id=str(session_id),
                         agent_name='DynamicTimeSeriesAgent',
                         call_tree=call_tree,
                         get_node_id=get_node_id
                     )
                 elif prompt_type == 'pinpoint_value':
-                    result = await self.pinpoint_value_agent.analyze_query(
-                        sub,
-                        session_id=session_id,
-                        agent_name='PinpointValueAgent',
-                        call_tree=call_tree,
-                        get_node_id=get_node_id
-                    )
+                    # Loop to fill missing parameters using interaction agent
+                    filled_params = {}
+                    def parse_param_value(param_name, param_info, response):
+                        # Try to parse the response based on expected type
+                        expected_type = param_info.get("type", "string")
+                        if expected_type in ("int", "float"):
+                            try:
+                                val = float(response)
+                                if expected_type == "int":
+                                    return int(val)
+                                return val
+                            except Exception:
+                                return None
+                        elif expected_type == "yes/no":
+                            if str(response).strip().lower() in ("yes", "no"):
+                                return str(response).strip().lower()
+                            return None
+                        else:
+                            return response.strip() if isinstance(response, str) else response
+
+                    while True:
+                        # Build an updated prompt with filled parameter values
+                        if filled_params:
+                            given_str = "; ".join(f"{k}={v}" for k, v in filled_params.items() if v is not None)
+                            updated_prompt = f"{sub}\nGiven: {given_str}"
+                        else:
+                            updated_prompt = sub
+                        result = await self.pinpoint_value_agent.analyze_query(
+                            updated_prompt,
+                            session_id=str(session_id),
+                            agent_name='PinpointValueAgent',
+                            call_tree=call_tree,
+                            get_node_id=get_node_id,
+                            extracted_params=filled_params if filled_params else None
+                        )
+                        # If an error occurred during parameter collection, abort immediately
+                        if isinstance(result, dict) and result.get("error"):
+                            self.logger.error(f"Aborting due to missing parameter: {result['error']}")
+                            return result
+                        if isinstance(result, dict) and result.get("missing_parameters"):
+                            self.logger.warning(f"Missing parameters detected: {result['missing_parameters']}")
+                            # Use interaction agent to collect missing values
+                            required_params_info = result.get("parameters", {})
+                            for param in result["missing_parameters"]:
+                                param_info = {}
+                                # Try to get param_info from the latest result if available
+                                if param in required_params_info:
+                                    param_info = {"description": "", "type": "string"}
+                                    # Try to infer type from description if not present
+                                    if isinstance(required_params_info, dict):
+                                        param_info = required_params_info.get(param, param_info)
+                                prompt_text = f"Please provide a value for '{param}'"
+                                if "description" in param_info and param_info["description"]:
+                                    prompt_text += f" ({param_info['description']})"
+                                prompt_text += ":"
+                                max_retries = 3
+                                for attempt in range(max_retries):
+                                    # Use LLM direct value response if available
+                                    if hasattr(self.interaction_agent, "generate_parameter_value_response"):
+                                        user_value = self.interaction_agent.generate_parameter_value_response(param, param_info).response
+                                    else:
+                                        user_value = self.interaction_agent.generate_response(prompt_text).response
+                                    parsed_value = parse_param_value(param, param_info, user_value)
+                                    if parsed_value is not None:
+                                        filled_params[param] = parsed_value
+                                        break
+                                    else:
+                                        prompt_text = f"Invalid value for '{param}'. Please enter a valid {param_info.get('type', 'value')}:"
+                                else:
+                                    # Fallback: prompt user directly via input()
+                                    self.logger.warning(f"LLM failed to provide a valid value for '{param}'. Falling back to manual user input.")
+                                    for attempt in range(2):
+                                        try:
+                                            user_value = input(f"[USER INPUT REQUIRED] Please enter a value for '{param}': ")
+                                        except Exception as e:
+                                            self.logger.error(f"Input error for '{param}': {e}")
+                                            user_value = ""
+                                        parsed_value = parse_param_value(param, param_info, user_value)
+                                        if parsed_value is not None:
+                                            filled_params[param] = parsed_value
+                                            break
+                                        else:
+                                            print(f"Invalid value for '{param}'. Please enter a valid {param_info.get('type', 'value')}.")
+                                    else:
+                                        # Abort if still invalid after retries
+                                        error_msg = (
+                                            f"Failed to obtain valid values for required parameters after LLM and user input attempts.\n"
+                                            f"Please provide the following values in your next request:\n"
+                                            f"  - {param} (type: {param_info.get('type', 'value')}, description: {param_info.get('description', '')})"
+                                        )
+                                        self.logger.error(error_msg)
+                                        print(error_msg)
+                                        return {
+                                            "error": error_msg,
+                                            "missing_parameter": param,
+                                            "sub_prompt": sub
+                                        }
+                            # Continue loop to re-run with filled_params
+                        else:
+                            break
+                    # If an error occurred during parameter collection, abort immediately
+                    if isinstance(result, dict) and result.get("error"):
+                        self.logger.error(f"Aborting due to missing parameter: {result['error']}")
+                        return result
+                    # Check for missing parameters in pinpoint_value_agent result
+                    if isinstance(result, dict) and result.get("missing_parameters"):
+                        self.logger.warning(f"Missing parameters detected: {result['missing_parameters']}")
+                        # Return early with missing parameters info
+                        return {
+                            "missing_parameters": result["missing_parameters"],
+                            "message": result.get("message", "Missing required parameters."),
+                            "sub_prompt": sub
+                        }
                 else:
                     # Fallback to time_series_agent for other types for now
                     print(f"[DEBUG] Fallback to DynamicTimeSeriesAgent for prompt type: {prompt_type}")
@@ -271,7 +377,7 @@ class OrchestratorAgent:
                 print(f"[DEBUG] Result from DynamicTimeSeriesAgent: {result}")
                 self.log_agent_call(call_tree, sub_agent_node_id, 'DynamicTimeSeriesAgent', 'analyze_query', sub_prompt_node_id, parameters={'sub_prompt': sub}, result=str(result))
                 results.append({"sub_prompt": sub, "result": result})
-                summary = getattr(result, 'summary', None) or (result.summary if hasattr(result, 'summary') else None)
+                summary = result.get('summary') if isinstance(result, dict) else getattr(result, 'summary', None)
                 if summary:
                     table.append({"sub_prompt": sub, **summary})
                 # Log decision point and add to call_tree
@@ -419,6 +525,6 @@ class OrchestratorAgent:
 if __name__ == "__main__":
     import asyncio
     orchestrator = OrchestratorAgent()
-    prompt = "what is the load factor of a generator that produces 0.27 GWh per day over a year and a capacity of 50 MW"
+    prompt = "what is the load factor of a generator"
     print("[DEBUG] Running orchestrator main entry point.")
     asyncio.run(orchestrator.analyze(prompt))

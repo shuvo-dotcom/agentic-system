@@ -13,7 +13,7 @@ class PinpointValueAgent:
         self.formula_resolver = LLMFormulaResolver()
         self.param_worker = SimpleNumberWorker()
 
-    async def analyze_query(self, prompt: str, session_id: str, agent_name: str, call_tree: dict, get_node_id) -> dict:
+    async def analyze_query(self, prompt: str, session_id: str, agent_name: str, call_tree: dict, get_node_id, extracted_params: dict = None) -> dict:
         """
         Analyzes a prompt to calculate a single value.
         """
@@ -23,27 +23,86 @@ class PinpointValueAgent:
         formula_input = {"operation": "resolve_and_generate_code", "query": prompt}
         formula_details_response = await self.formula_resolver.process(formula_input)
         
-        if formula_details_response['status'] != 'success':
-            return {"error": "Failed to resolve formula."}
+        if not formula_details_response.get('success', False):
+            return {"error": "Failed to resolve formula.", "details": formula_details_response.get('error')}
             
-        formula_details = formula_details_response['data']
+        formula_details = formula_details_response.get('data', {})
         formula = formula_details.get('formula')
         required_params_info = formula_details.get('parameters', {})
         
-        # 2. Extract parameters from prompt
-        extracted_params = {}
+        # 2. Extract parameters from prompt or use provided extracted_params
+        params = dict(extracted_params) if extracted_params else {}
         for param_name, param_info in required_params_info.items():
-            value = await self.param_worker.extract(prompt, param_name)
-            if value is not None:
-                extracted_params[param_name] = value
-        
+            if param_name not in params or params[param_name] is None:
+                value = await self.param_worker.extract(prompt, param_name)
+                if value is not None:
+                    params[param_name] = value
+
+        # Identify missing required parameters dynamically based on LLM parameter info
+        missing_params = []
+        for param_name, param_info in required_params_info.items():
+            is_required = param_info.get('required', False)
+            if is_required and (param_name not in params or params[param_name] is None):
+                missing_params.append(param_name)
+
+        if missing_params:
+            # Return a response indicating missing parameters to ask the user
+            return {
+                "prompt": prompt,
+                "formula": formula,
+                "parameters": params,
+                "missing_parameters": missing_params,
+                "result": None,
+                "message": f"Missing required parameters: {', '.join(missing_params)}. Please provide these values."
+            }
+
+        # Dynamic type conversion for all parameters before formula evaluation
+        def dynamic_type_convert(value, expected_type):
+            if value is None:
+                return None
+            # Remove any leading/trailing quotes and whitespace
+            if isinstance(value, str):
+                value = value.strip().strip('"').strip("'")
+            if expected_type == "int":
+                try:
+                    # Extract first integer from string if present
+                    import re
+                    match = re.search(r'-?\d+', str(value))
+                    if match:
+                        return int(match.group(0))
+                    return int(float(value))
+                except Exception:
+                    return None
+            elif expected_type == "float":
+                try:
+                    # Extract first float from string if present
+                    import re
+                    match = re.search(r'-?\d+(\.\d+)?', str(value))
+                    if match:
+                        return float(match.group(0))
+                    return float(value)
+                except Exception:
+                    return None
+            elif expected_type == "yes/no":
+                val = str(value).strip().lower()
+                if val in ("yes", "no"):
+                    return val
+                return None
+            else:
+                return value
+
+        for param_name, param_info in required_params_info.items():
+            if param_name in params and params[param_name] is not None:
+                expected_type = param_info.get("type", "string")
+                params[param_name] = dynamic_type_convert(params[param_name], expected_type)
+
         # 3. Execute formula
-        result = self._execute_formula(formula, extracted_params)
+        result = self._execute_formula(formula, params)
 
         return {
             "prompt": prompt,
             "formula": formula,
-            "parameters": extracted_params,
+            "parameters": params,
             "result": result
         }
 

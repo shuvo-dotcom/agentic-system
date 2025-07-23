@@ -73,6 +73,39 @@ class HumanSimulator:
         except Exception as e:
             logger.error(f"Error generating human response: {e}")
             return self._fallback_response(agent_query)
+
+    def generate_parameter_value_response(self, param_name: str, param_info: Dict[str, Any], context: Dict[str, Any] = None) -> HumanResponse:
+        """
+        Generate a direct value response for a parameter using the LLM.
+        """
+        if not self.client:
+            # Fallback to rule-based or generic
+            return self._fallback_response(f"Parameter value for {param_name}")
+        param_type = param_info.get("type", "string")
+        description = param_info.get("description", "")
+        prompt = (
+            f"You are a user providing a value for a required parameter in an energy analysis system.\n"
+            f"Parameter: {param_name}\n"
+            f"Type: {param_type}\n"
+            f"Description: {description}\n"
+            f"Context: {context or {}}\n"
+            f"Please provide ONLY the value for '{param_name}' as a valid {param_type}. Do not include any explanation, units, or extra text. Just the value."
+        )
+        response = self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": prompt}
+            ],
+            max_tokens=20,
+            temperature=0.0
+        )
+        value = response.choices[0].message.content.strip()
+        return HumanResponse(
+            response=value,
+            confidence=1.0,
+            reasoning="LLM direct value response for parameter",
+            context={"method": "llm_param_value", "param": param_name, "type": param_type}
+        )
     
     def _llm_generated_response(self, agent_query: str, context: Dict[str, Any] = None) -> HumanResponse:
         """Generate response using LLM for more realistic interactions"""
@@ -149,4 +182,4 @@ class HumanSimulator:
         """Add context to conversation history"""
         self.conversation_history.append(context)
         if len(self.conversation_history) > 10:  # Keep last 10 interactions
-            self.conversation_history.pop(0) 
+            self.conversation_history.pop(0)
