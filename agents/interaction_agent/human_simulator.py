@@ -18,7 +18,7 @@ import json
 import random
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-from openai import OpenAI
+from utils.llm_provider import get_llm_response, get_openai_client
 import logging
 import os
 
@@ -38,7 +38,7 @@ class HumanSimulator:
     """
     
     def __init__(self, api_key: Optional[str] = None, template_path: Optional[str] = None):
-        self.client = OpenAI(api_key=api_key) if api_key else None
+        self.client = get_openai_client() if api_key else None
         self.conversation_history = []
         self.personality_traits = {
             "technical_knowledge": 0.7,  # 0-1 scale

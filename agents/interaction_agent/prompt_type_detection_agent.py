@@ -1,41 +1,37 @@
-import re
-from typing import Literal
+import json
+from utils.llm_provider import get_llm_response
 
 class PromptTypeDetectionAgent:
     """
-    Detects the type of analysis required for a given sub-prompt.
+    Detects the type of analysis required for a given sub-prompt using an LLM dynamically.
     Types:
     - 'time_series': Requires trend analysis over time.
     - 'pinpoint_value': Requires a single value calculation.
-    - 'comparison': Compares two or more entities/values.
-    - 'explanation': Asks for an explanation or reasoning.
-    - 'data_retrieval': Asks to get, find, or list data.
-    - 'other': Does not fit known types.
     """
 
-    def detect_type(self, prompt: str) -> Literal['time_series', 'pinpoint_value', 'comparison', 'explanation', 'data_retrieval', 'other']:
-        prompt_lower = prompt.lower()
+    def __init__(self, api_key: str = ""):
+        pass  # API key and client are now managed by llm_provider
 
-        # Order is important to avoid misclassification
-        
-        # 1. Time series: look for time-related words and trend/forecast words
-        if re.search(r'\b(trend|over time|per year|annual|monthly|daily|change over|evolution|history|forecast|projected|historical|time series)\b', prompt_lower):
-            return 'time_series'
-
-        # 2. Comparison: look for comparison words
-        if re.search(r'\b(compare|difference|vs\.?|versus|greater than|less than|more than|between|which is better)\b', prompt_lower):
-            return 'comparison'
-            
-        # 3. Explanation: look for "why", "explain", etc.
-        if re.search(r'\b(why|explain|reason|how does|describe|meaning of|what is the purpose of)\b', prompt_lower):
-            return 'explanation'
-
-        # 4. Pinpoint value: look for calculation/determination words
-        if re.search(r'\b(what is|calculate|find the value of|determine|compute|result of|how much|how many)\b', prompt_lower):
-            return 'pinpoint_value'
-            
-        # 5. Data retrieval: look for get/find/list words
-        if re.search(r'\b(get|find|list|show me|retrieve|what are)\b', prompt_lower):
-            return 'data_retrieval'
-
-        return 'other'
+    def detect_type(self, prompt: str) -> str:
+        """
+        Classify the prompt into one of the known types using an LLM.
+        Returns the type name or 'other' if unrecognized.
+        """
+        system_prompt = (
+            "You are an expert prompt classifier. "
+            "Given a user prompt, classify it into one of the following types: "
+            "'time_series', 'pinpoint_value'"
+            "Respond with only the type name, no extra text."
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ]
+        response = get_llm_response(
+            messages,
+            max_tokens=10,
+            temperature=0.0
+        )
+        detected = response.strip().lower() if response else ""
+        valid_types = {'time_series', 'pinpoint_value'}
+        return detected if detected in valid_types else 'other'

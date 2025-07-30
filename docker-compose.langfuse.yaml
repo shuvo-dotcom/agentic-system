@@ -1,0 +1,48 @@
+version: "3.9"
+services:
+  langfuse:
+    image: ghcr.io/langfuse/langfuse:2.5
+    ports:
+      - "3001:3000"
+    environment:
+      - NEXTAUTH_SECRET=changeme
+      - SALT=Q2F0cyBhcmUgZ3JlYXQhIFRoaXMgaXMgYSByYW5kb20gc2FsdCBmb3IgbGFuZ2Z1c2Uu
+      - DATABASE_URL=postgresql://n8n:n8n@postgres:5432/langfuse
+      - CLICKHOUSE_URL=clickhouse://default:default@clickhouse:9000
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://default:default@clickhouse:9000
+      - LANGFUSE_CLICKHOUSE_MIGRATION_ENGINE=MergeTree
+      - CLICKHOUSE_MIGRATION_ENGINE=MergeTree
+      - NEXTAUTH_URL=http://localhost:3001
+      - TELEMETRY_ENABLED=false
+      - LANGFUSE_ENABLE_SIGNUP=true
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=default
+    depends_on:
+      - clickhouse
+      - postgres
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    volumes:
+      - ./users.xml:/etc/clickhouse-server/users.d/users.xml
+    ports:
+      - "8123:8123"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: n8n
+      POSTGRES_DB: langfuse
+    ports:
+      - "5432:5432"
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+
+volumes:
+  langfuse-db-data:

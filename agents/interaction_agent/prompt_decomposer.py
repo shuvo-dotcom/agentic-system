@@ -18,8 +18,8 @@ class PromptDecomposerAgent:
         self.llm_client = None
         if api_key:
             try:
-                from openai import OpenAI
-                self.llm_client = OpenAI(api_key=api_key)
+                from utils.llm_provider import get_openai_client
+                self.llm_client = get_openai_client()
             except ImportError:
                 self.llm_client = None
         # Load config-driven lists for metrics

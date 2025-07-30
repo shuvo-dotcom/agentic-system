@@ -4,7 +4,7 @@ Configuration settings for the Agentic System.
 import os
 
 # OpenAI API Configuration
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = "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"
 OPENAI_MODEL = "gpt-4o"
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-ada-002")
 
@@ -26,6 +26,9 @@ TIMEOUT = int(os.getenv("TIMEOUT", "30"))
 
 DELETE_LOG_FILE_AFTER_UPLOAD = True
 
+LANGCHAIN_API_KEY="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"
 
-
-
+# Langfuse configuration
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
+LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")

@@ -11,7 +11,7 @@ import asyncio
 from typing import Dict, List, Optional, Union, Callable
 from dataclasses import dataclass
 from enum import Enum
-import openai
+from utils.llm_provider import get_llm_response
 from config.settings import OPENAI_API_KEY, OPENAI_MODEL
 
 class VariationType(Enum):
@@ -43,8 +43,8 @@ class ParameterVariation:
     def __init__(self):
         # Initialize OpenAI client
         try:
-            from openai import OpenAI
-            self.client = OpenAI(api_key=OPENAI_API_KEY)
+            from utils.llm_provider import get_openai_client
+            self.client = get_openai_client()
         except ImportError:
             self.client = None
 

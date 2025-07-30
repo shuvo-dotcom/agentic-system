@@ -1,6 +1,6 @@
 import json
 from core.simple_base_agent import SimpleBaseAgent
-from openai import OpenAI
+from utils.llm_provider import get_llm_response, get_openai_client
 from config.settings import OPENAI_API_KEY
 
 class ParsingWorkerAgent(SimpleBaseAgent):
@@ -9,7 +9,7 @@ class ParsingWorkerAgent(SimpleBaseAgent):
     """
     def __init__(self):
         super().__init__("ParsingWorkerAgent", "Extracts a specific parameter value from a query using LLM.")
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        self.client = get_openai_client()
 
     async def extract(self, query: str, parameter: str, model: str = None) -> dict:
         # Try gpt-4.1-mini first, then gpt-4o, then gpt-4 as fallback if value is null
@@ -57,9 +57,7 @@ Query: \"{query}\"
 
     @staticmethod
     async def extract_param_names(query: str, model: str = "gpt-4.1-mini") -> list:
-        from openai import OpenAI
-        from config.settings import OPENAI_API_KEY
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = get_openai_client()
         prompt = f"""
 List all parameter names (as a JSON array of strings) that are relevant for calculation in the following query. Only return the JSON array, no extra text.
 Query: \"{query}\"

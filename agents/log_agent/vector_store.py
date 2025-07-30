@@ -1,4 +1,4 @@
-import openai
+from utils.llm_provider import create_embeddings
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 from typing import List, Dict, Any, Optional
@@ -11,7 +11,6 @@ class QdrantVectorStore:
         self.openai_api_key = openai_api_key
         self.vector_size = 3072
         self._ensure_collection()
-        openai.api_key = openai_api_key
 
     def _ensure_collection(self):
         if self.collection_name not in [c.name for c in self.client.get_collections().collections]:
@@ -24,25 +23,92 @@ class QdrantVectorStore:
             )
 
     def embed_text(self, text: str) -> List[float]:
-        response = openai.embeddings.create(
-            input=text,
-            model="text-embedding-3-large"
-        )
-        return response.data[0].embedding
+        embeddings = create_embeddings([text], model="text-embedding-3-large")
+        return embeddings[0]
 
     def upsert_log(self, log_id: str, message: str, embedding: List[float], metadata: Optional[Dict[str, Any]] = None):
         payload = metadata.copy() if metadata else {}
         payload['message'] = message
-        self.client.upsert(
-            collection_name=self.collection_name,
-            points=[
-                qmodels.PointStruct(
-                    id=log_id,
-                    vector=embedding,
-                    payload=payload
+        
+        # Add debug information about payload size
+        payload_size = len(str(payload))
+        print(f"[DEBUG] Upserting log {log_id[:8]}... with payload size: {payload_size} bytes")
+        
+        # Ensure no data truncation by checking key fields
+        if 'full_message' in payload:
+            print(f"[DEBUG] Full message length: {len(payload['full_message'])} chars")
+        
+        try:
+            self.client.upsert(
+                collection_name=self.collection_name,
+                points=[
+                    qmodels.PointStruct(
+                        id=log_id,
+                        vector=embedding,
+                        payload=payload
+                    )
+                ]
+            )
+            print(f"[DEBUG] Successfully upserted log {log_id[:8]}...")
+        except Exception as e:
+            print(f"[ERROR] Failed to upsert log {log_id}: {e}")
+            # Try with truncated message if it's too large
+            if len(message) > 10000:  # Truncate very large messages
+                payload['message'] = message[:10000] + "... [TRUNCATED]"
+                payload['message_truncated'] = True
+                payload['original_length'] = len(message)
+                self.client.upsert(
+                    collection_name=self.collection_name,
+                    points=[
+                        qmodels.PointStruct(
+                            id=log_id,
+                            vector=embedding,
+                            payload=payload
+                        )
+                    ]
                 )
-            ]
-        )
+                print(f"[DEBUG] Upserted log {log_id[:8]}... with truncated message")
+            else:
+                raise
+
+    def verify_log_storage(self, log_id: str) -> Dict[str, Any]:
+        """Verify that a log was stored correctly and return its details."""
+        try:
+            result = self.client.retrieve(
+                collection_name=self.collection_name,
+                ids=[log_id]
+            )
+            if result:
+                point = result[0]
+                payload = point.payload
+                return {
+                    'stored': True,
+                    'log_id': log_id,
+                    'message_length': len(payload.get('message', '')),
+                    'full_message_length': len(payload.get('full_message', '')),
+                    'metadata_keys': list(payload.keys()),
+                    'timestamp': payload.get('timestamp', ''),
+                    'session_id': payload.get('session_id', ''),
+                    'agent_name': payload.get('agent_name', ''),
+                    'has_tree_info': 'tree_info' in payload
+                }
+            else:
+                return {'stored': False, 'log_id': log_id}
+        except Exception as e:
+            return {'stored': False, 'log_id': log_id, 'error': str(e)}
+
+    def get_storage_stats(self) -> Dict[str, Any]:
+        """Get statistics about stored logs."""
+        try:
+            collection_info = self.client.get_collection(self.collection_name)
+            count = collection_info.points_count
+            return {
+                'total_logs': count,
+                'collection_name': self.collection_name,
+                'vector_size': self.vector_size
+            }
+        except Exception as e:
+            return {'error': str(e)}
 
     def semantic_search(self, query: str, top_k: int = 5, depth_filter: Optional[int] = None, parent_id: Optional[str] = None, step_id: Optional[str] = None, parent_step_id: Optional[str] = None) -> List[Dict[str, Any]]:
         embedding = self.embed_text(query)

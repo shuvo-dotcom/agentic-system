@@ -1,0 +1,13 @@
+{
+  "provider": "openai",
+  "openai": {
+    "api_key": "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",
+    "model": "gpt-4o",
+    "api_base": "https://api.openai.com/v1"
+  },
+  "anthropic": {
+    "api_key": "sk-ant-REPLACE_ME",
+    "model": "claude-3-opus-20240229",
+    "api_base": "https://api.anthropic.com/v1"
+  }
+}
