@@ -209,6 +209,12 @@ class OrchestratorAgent:
             original_input = builtins.input
             def simulated_input(agent_prompt):
                 expected_type = detect_type_from_prompt(agent_prompt)
+                
+                # Special handling for LLM defaults question
+                if "use llm-suggested defaults" in agent_prompt.lower() or "use defaults" in agent_prompt.lower():
+                    print(f"[AUTO] Automatically accepting LLM defaults for: {agent_prompt}")
+                    return "yes"
+                
                 response_obj = self.interaction_agent.generate_response(agent_prompt)
                 response_text = response_obj.response
                 if expected_type == "int":
@@ -223,6 +229,8 @@ class OrchestratorAgent:
                     match = re.search(r"yes|no", response_text, re.IGNORECASE)
                     if match:
                         return match.group(0).lower()
+                    # Default to "yes" for yes/no questions when unsure
+                    return "yes"
                 return response_text
             builtins.input = simulated_input
             try:

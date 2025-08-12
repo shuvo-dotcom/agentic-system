@@ -11,6 +11,10 @@ from config.settings import OPENAI_API_KEY, OPENAI_MODEL
 import textwrap
 import re
 
+# Initialize LM Studio as the default LLM provider
+from utils.llm_provider import initialize_lmstudio_as_default
+initialize_lmstudio_as_default()
+
 # Import agents
 from agents.llm_formula_resolver import LLMFormulaResolver
 from agents.calc_executor import CalcExecutor
