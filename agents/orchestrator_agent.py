@@ -292,7 +292,21 @@ class OrchestratorAgent:
                             return result
                         if isinstance(result, dict) and result.get("missing_parameters"):
                             self.logger.warning(f"Missing parameters detected: {result['missing_parameters']}")
-                            # Use interaction agent to collect missing values
+                            
+                            # First, try to resolve parameters using CSV data if available
+                            if hasattr(self, '_resolve_parameters_from_csv'):
+                                self.logger.info("[CSV Integration] Attempting to resolve parameters using CSV data")
+                                csv_resolved_params = await self._resolve_parameters_from_csv(
+                                    sub, result["missing_parameters"], result.get("parameters", {})
+                                )
+                                for param_name, param_value in csv_resolved_params.items():
+                                    if param_name in result["missing_parameters"]:
+                                        filled_params[param_name] = param_value
+                                        self.logger.info(f"[CSV Integration] Resolved '{param_name}' = '{param_value}' from CSV data")
+                                        # Remove from missing parameters list
+                                        result["missing_parameters"] = [p for p in result["missing_parameters"] if p != param_name]
+                            
+                            # Use interaction agent to collect remaining missing values
                             required_params_info = result.get("parameters", {})
                             for param in result["missing_parameters"]:
                                 param_info = {}
