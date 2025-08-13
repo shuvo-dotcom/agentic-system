@@ -65,6 +65,19 @@ class CalcExecutor(SimpleBaseAgent):
             'sympy': sympy,
             'random': random
         }
+        
+        # Add dynamic constants to execution environment
+        try:
+            from config.constants import TimeConstants, EnergyDefaults, FinancialDefaults, LLMDefaults, SystemDefaults
+            self.safe_globals.update({
+                'TimeConstants': TimeConstants,
+                'EnergyDefaults': EnergyDefaults,
+                'FinancialDefaults': FinancialDefaults,
+                'LLMDefaults': LLMDefaults,
+                'SystemDefaults': SystemDefaults
+            })
+        except ImportError:
+            self.logger.warning("Could not import dynamic constants - using fallback values")
     
     def execute_formula(self, formula: str, parameters: Dict[str, Union[float, List[float]]],
                        formula_type: str = "standard", session_id: int = None, agent_name: str = 'CalcExecutor') -> Dict[str, Any]:

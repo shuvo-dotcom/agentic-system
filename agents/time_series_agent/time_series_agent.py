@@ -11,10 +11,14 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
 from .time_detector import TimeDetector, TimePeriod, ForecastingRequest, TimeGranularity
+from .parameter_extractor import DynamicParameterExtractor
+from .parameter_variation import VariationModel
+from config.settings import OPENAI_MODEL
 from .parameter_extractor import DynamicParameterExtractor, ExtractedParameter
 from .parameter_variation import ParameterVariation
 from .scenario_generator import ScenarioGenerator
 from config.settings import OPENAI_MODEL
+from config.constants import TimeConstants
 
 @dataclass
 class AnalysisResult:
@@ -158,7 +162,13 @@ class DynamicTimeSeriesAgent:
                             print(f"      Confidence: {default_data['confidence']:.1%}")
                         
                         # Ask user if they want to use defaults or provide custom values
-                        use_defaults = input("\n🤔 Use LLM-suggested defaults? (yes/no): ").lower().strip()
+                        # For non-interactive mode (when called by orchestrator), automatically use defaults
+                        try:
+                            use_defaults = input("\n🤔 Use LLM-suggested defaults? (yes/no): ").lower().strip()
+                        except EOFError:
+                            # Non-interactive mode, automatically use defaults
+                            use_defaults = 'yes'
+                            print("\n🤖 Running in non-interactive mode - automatically using LLM-suggested defaults")
                         
                         if call_tree and get_node_id:
                             user_choice_node_id = get_node_id('user_choice')
@@ -185,31 +195,38 @@ class DynamicTimeSeriesAgent:
                 
                 # If user didn't choose to use LLM defaults, get suggestions again
                 if not user_responses.get('use_llm_defaults', False):
-                    suggested_defaults = await self.parameter_extractor.suggest_default_values(
-                        missing_params, calculation_type, query
-                    )
-                    
-                    # Add LLM suggestion nodes
-                    if call_tree and get_node_id and suggested_defaults:
-                        for param_name, default_data in suggested_defaults.items():
-                            llm_node_id = get_node_id('llm_suggest')
-                            call_tree[llm_node_id] = {
-                                'agent_name': agent_name,
-                                'operation': 'llm_suggest_default',
-                                'parent_id': None, # Root node for LLM suggestions
-                                'parameters': {'param': param_name, **default_data},
-                                'result': None
-                            }
-                    if suggested_defaults:
-                        print(f"\n💡 Suggested Default Values:")
-                        for param_name, default_data in suggested_defaults.items():
-                            print(f"   {param_name}: {default_data['value']} {default_data['unit']}")
-                            print(f"      Reasoning: {default_data['reasoning']}")
-                            print(f"      Confidence: {default_data['confidence']:.1%}")
+                    # Only get new suggestions if we don't already have them
+                    if not suggested_defaults:
+                        suggested_defaults = await self.parameter_extractor.suggest_default_values(
+                            missing_params, calculation_type, query
+                        )
+                        
+                        # Add LLM suggestion nodes
+                        if call_tree and get_node_id and suggested_defaults:
+                            for param_name, default_data in suggested_defaults.items():
+                                llm_node_id = get_node_id('llm_suggest')
+                                call_tree[llm_node_id] = {
+                                    'agent_name': agent_name,
+                                    'operation': 'llm_suggest_default',
+                                    'parent_id': None, # Root node for LLM suggestions
+                                    'parameters': {'param': param_name, **default_data},
+                                    'result': None
+                                }
+                        if suggested_defaults:
+                            print(f"\n💡 Using Suggested Default Values:")
+                            for param_name, default_data in suggested_defaults.items():
+                                print(f"   {param_name}: {default_data['value']} {default_data['unit']}")
+                                print(f"      Reasoning: {default_data['reasoning']}")
+                                print(f"      Confidence: {default_data['confidence']:.1%}")
+                    else:
+                        # We already have suggestions, just use them
+                        print(f"\n✅ Using previously suggested default values.")
             
-            # Step 4: Convert to calculation format
-            calculation_params = self.parameter_extractor.convert_to_calculation_format(
-                extracted_params, suggested_defaults if 'suggested_defaults' in locals() else None
+            # Step 4: Convert to calculation format with intelligent normalization
+            calculation_params = await self.parameter_extractor.convert_to_calculation_format_with_normalization(
+                extracted_params, 
+                suggested_defaults if 'suggested_defaults' in locals() else None,
+                query
             )
             
             print(f"\n📊 Final Parameters for Calculation:")
@@ -250,10 +267,10 @@ class DynamicTimeSeriesAgent:
                 print(f"🔧 Calculating for year {year} with params: {scenario_params}")
                 
                 # Use LLM to determine what calculation to perform based on available parameters
-                if self.parameter_extractor.client:
-                    try:
-                        calc_prompt = f"""
-You are an expert energy analyst. The user's original query was: "{query}"
+                try:
+                    query_safe = query.replace('"', "'")  # Replace quotes to avoid string issues
+                    calc_prompt = f"""
+You are an expert energy analyst. The user's original query was: "{query_safe}"
 
 Given these parameters, determine what calculation should be performed and calculate the result.
 
@@ -304,42 +321,47 @@ Example for LCOE calculation:
 }}
 """
 
-                        response = await asyncio.to_thread(
-                            self.parameter_extractor.client.chat.completions.create,
-                            model=OPENAI_MODEL,
-                            messages=[
-                                {"role": "system", "content": "You are an expert energy analyst specializing in dynamic calculations. Always match the user's intent from their original query."},
-                                {"role": "user", "content": calc_prompt}
-                            ],
-                            temperature=0.1,
-                            max_tokens=300
-                        )
-                        
-                        content = response.choices[0].message.content.strip()
-                        
-                        # Extract JSON from response
-                        start_idx = content.find('{')
-                        end_idx = content.rfind('}') + 1
-                        if start_idx != -1 and end_idx != 0:
-                            json_str = content[start_idx:end_idx]
-                            result = json.loads(json_str)
-                            
-                            print(f"   📊 {result['calculation_type'].upper()} calculated: {result['result']} {result['unit']}")
-                            print(f"   💭 {result['reasoning']}")
-                            
-                            return {
-                                'success': True,
-                                'result': float(result['result']),
-                                'unit': result['unit'],
-                                'year': year,
-                                'parameters': scenario_params,
-                                'calculation_type': result['calculation_type'],
-                                'reasoning': result['reasoning'],
-                                'confidence': float(result['confidence'])
-                            }
+                    from utils.llm_provider import get_llm_response
                     
-                    except Exception as e:
-                        print(f"   ⚠️  LLM calculation failed: {e}")
+                    messages = [
+                        {"role": "system", "content": "You are an expert energy analyst specializing in dynamic calculations. Always match the user's intent from their original query."},
+                        {"role": "user", "content": calc_prompt}
+                    ]
+                    
+                    response_text = await asyncio.to_thread(
+                        get_llm_response,
+                        messages,
+                        temperature=0.1,
+                        max_tokens=300
+                    )
+                    
+                    content = response_text.strip()
+                    
+                    # Extract JSON from response
+                    start_idx = content.find('{')
+                    end_idx = content.rfind('}') + 1
+                    if start_idx != -1 and end_idx != 0:
+                        json_str = content[start_idx:end_idx]
+                        result = json.loads(json_str)
+                        
+                        print(f"   📊 {result['calculation_type'].upper()} calculated: {result['result']} {result['unit']}")
+                        print(f"   💭 {result['reasoning']}")
+                        
+                        return {
+                            'success': True,
+                            'result': float(result['result']),
+                            'unit': result['unit'],
+                            'year': year,
+                            'parameters': scenario_params,
+                            'calculation_type': result['calculation_type'],
+                            'reasoning': result['reasoning'],
+                            'confidence': float(result['confidence'])
+                        }
+                    else:
+                        print(f"   ⚠️  Failed to parse LLM response: {content}")
+                
+                except Exception as e:
+                    print(f"   ⚠️  LLM calculation failed: {e}")
                 
                 # Fallback to simple calculations
                 return await self._fallback_calculation(scenario_params, year)
@@ -351,7 +373,7 @@ Example for LCOE calculation:
                     rated_capacity = scenario_params['rated_capacity']
                     if 'energy_production' in scenario_params:
                         energy_production = scenario_params['energy_production']
-                        capacity_factor = (energy_production / (rated_capacity * 8760)) * 100
+                        capacity_factor = (energy_production / (rated_capacity * TimeConstants.HOURS_PER_YEAR)) * 100
                         return {
                             'success': True,
                             'result': capacity_factor,
@@ -362,9 +384,9 @@ Example for LCOE calculation:
                         }
                     elif 'energy_production_degradation_rate' in scenario_params:
                         degradation_rate = scenario_params['energy_production_degradation_rate'] / 100
-                        base_energy = rated_capacity * 8760
+                        base_energy = rated_capacity * TimeConstants.HOURS_PER_YEAR
                         degraded_energy = base_energy * (1 - degradation_rate)
-                        capacity_factor = (degraded_energy / (rated_capacity * 8760)) * 100
+                        capacity_factor = (degraded_energy / (rated_capacity * TimeConstants.HOURS_PER_YEAR)) * 100
                         return {
                             'success': True,
                             'result': capacity_factor,

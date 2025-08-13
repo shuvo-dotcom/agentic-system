@@ -6,8 +6,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable
 from datetime import datetime
-
-from config.settings import OPENAI_API_KEY, OPENAI_MODEL, MAX_RETRIES, TIMEOUT
+from utils.llm_provider import get_llm_response
+from config.settings import MAX_RETRIES, TIMEOUT
 
 
 class SimpleBaseAgent(ABC):
@@ -22,13 +22,7 @@ class SimpleBaseAgent(ABC):
         self.logger = logging.getLogger(f"agent.{name}")
         self.activity_log = []
         
-        # OpenAI client setup
-        try:
-            import openai
-            self.openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        except ImportError:
-            self.logger.warning("OpenAI client not available")
-            self.openai_client = None
+        # Using centralized LLM provider
     
     @abstractmethod
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -78,27 +72,19 @@ class SimpleBaseAgent(ABC):
             }
         }
     
-    async def call_openai(self, messages: List[Dict[str, str]], model: str = None) -> Dict[str, Any]:
-        """Call OpenAI API with error handling."""
-        if not self.openai_client:
-            return self.create_error_response("OpenAI client not available")
-        
+    async def call_llm(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
+        """Call LLM API with error handling using centralized provider."""
         try:
-            response = self.openai_client.chat.completions.create(
-                model=model or OPENAI_MODEL,
-                messages=messages,
-                max_tokens=1000,
-                temperature=0.1
-            )
+            response_text = get_llm_response(messages, **kwargs)
             
             return {
                 "success": True,
-                "response": response.choices[0].message.content,
-                "usage": response.usage.dict() if response.usage else {}
+                "response": response_text,
+                "metadata": {"provider": "centralized"}
             }
             
         except Exception as e:
-            return self.create_error_response(f"OpenAI API call failed: {str(e)}")
+            return self.create_error_response(f"LLM API call failed: {str(e)}")
     
     def get_activity_log(self) -> List[Dict[str, Any]]:
         """Get agent activity log."""

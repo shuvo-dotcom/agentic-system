@@ -2,8 +2,7 @@
 import re
 from typing import Dict, Any, List
 from core.simple_base_agent import SimpleBaseAgent
-from openai import OpenAI
-from config.settings import OPENAI_API_KEY
+from utils.llm_provider import get_llm_response
 import json
 
 class QueryParser(SimpleBaseAgent):
@@ -14,7 +13,7 @@ class QueryParser(SimpleBaseAgent):
     """
     def __init__(self):
         super().__init__("QueryParser", "Parses natural language queries to extract parameters using LLM.")
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Using centralized LLM provider
 
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -31,13 +30,11 @@ class QueryParser(SimpleBaseAgent):
 
         try:
             prompt = f"""You are an expert data extraction agent. Given the following user query, extract all relevant parameters (names, values, units, and context) as a JSON object. For each parameter, include its name, value, unit (if any), and a short context or description if possible. If a value contains a currency symbol or other non-numeric characters (e.g., '$2000/kW'), extract the numeric value (e.g., 2000) and provide the unit (e.g., '/kW'). Always provide the value as a number if possible. Only return the JSON object, do not include any other text.\n\nQuery: \"{query}\"\n\nExample output:\n{{\n  \"parameters\": {{\n    \"CAPEX\": {{\"value\": 2000, \"unit\": \"$/kW\", \"description\": \"Capital expenditure\"}},\n    \"OPEX_t\": {{\"value\": 50, \"unit\": \"$/kW/year\", \"description\": \"Operating expenditure per year\"}},\n    \"capacity_factor\": {{\"value\": 0.35, \"unit\": \"fraction\", \"description\": \"Capacity factor\"}},\n    \"discount_rate\": {{\"value\": 0.08, \"unit\": \"fraction\", \"description\": \"Discount rate\"}},\n    \"n\": {{\"value\": 20, \"unit\": \"years\", \"description\": \"Project lifetime\"}}\n  }}\n}}\n"""
-            response = self.client.chat.completions.create(
-                model="gpt-4.1-mini",
-                response_format={"type": "json_object"},
-                messages=[{"role": "user", "content": prompt}]
-            )
-            content = response.choices[0].message.content
-            parsed_content = json.loads(content) # type: ignore
+            
+            messages = [{"role": "user", "content": prompt}]
+            response_text = get_llm_response(messages, response_format={"type": "json_object"})
+            
+            parsed_content = json.loads(response_text)
             parameters = parsed_content.get("parameters", {})
             # --- Post-processing: clean all parameter values ---
             def clean_value(val):

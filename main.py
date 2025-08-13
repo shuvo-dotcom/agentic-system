@@ -12,8 +12,8 @@ import textwrap
 import re
 
 # Initialize LM Studio as the default LLM provider
-from utils.llm_provider import initialize_lmstudio_as_default
-initialize_lmstudio_as_default()
+from utils.llm_provider import initialize_llm_provider
+initialize_llm_provider()
 
 # Import agents
 from agents.llm_formula_resolver import LLMFormulaResolver
@@ -26,11 +26,82 @@ from agents.llm_parsing_worker import ParsingWorkerAgent
 # Setup logging
 LOG_FILE = "logs/agentic_system.log"
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-    logging.basicConfig(
+logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
+
+def sanitize_and_fix_code(code: str, parameters: dict) -> str:
+    """
+    Improved code sanitization that properly handles parameter assignments
+    """
+    lines = code.splitlines()
+    sanitized_lines = []
+    defined_variables = set()
+    used_variables = set()
+    
+    # First pass: identify what variables are used
+    for line in lines:
+        # Find variable usage (simple heuristic)
+        import re
+        vars_in_line = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', line)
+        for var in vars_in_line:
+            if var not in ['def', 'if', 'else', 'for', 'while', 'try', 'except', 'import', 'from', 'return', 'pass', 'raise', 'print', 'input', 'float', 'int', 'str', 'list', 'dict', 'True', 'False', 'None']:
+                used_variables.add(var)
+    
+    # Second pass: process lines and fix issues
+    skip_next = False
+    for i, line in enumerate(lines):
+        if skip_next:
+            skip_next = False
+            continue
+            
+        stripped = line.strip()
+        
+        # Skip problematic patterns
+        if (stripped.startswith('input(') or 
+            'input(' in stripped or 
+            stripped.startswith('raise ') or
+            stripped.startswith('print(') or
+            stripped.startswith('try:') or
+            stripped.startswith('except')):
+            continue
+            
+        # Handle variable definitions
+        if '=' in line and not line.strip().startswith('def '):
+            var_name = line.split('=')[0].strip()
+            defined_variables.add(var_name)
+            
+        sanitized_lines.append(line)
+    
+    # Third pass: add missing variable definitions
+    missing_vars = used_variables - defined_variables
+    parameter_assignments = []
+    
+    for var in missing_vars:
+        # Try to find a matching parameter
+        param_value = None
+        for param_key, param_info in parameters.items():
+            # Convert parameter names to valid variable names
+            clean_param_name = param_key.lower().replace(' ', '_').replace('-', '_')
+            if clean_param_name == var.lower() or param_key.lower().replace(' ', '_') == var.lower():
+                param_value = param_info.get('value')
+                break
+        
+        if param_value is not None:
+            parameter_assignments.append(f"{var} = {param_value}")
+        else:
+            # Use smart defaults from constants module
+            from config.constants import get_smart_default
+            default_value = get_smart_default(var)
+            parameter_assignments.append(f"{var} = {default_value}  # dynamic default")
+    
+    # Combine parameter assignments with the sanitized code
+    if parameter_assignments:
+        sanitized_lines = parameter_assignments + [''] + sanitized_lines
+    
+    return '\n'.join(sanitized_lines)
 
 def log_agent_step(agent_name, step, input_data, output_data):
     log_entry = {
@@ -59,25 +130,16 @@ async def process_query(query):
     if not llm_result.get("success"):
         return {"success": False, "error": "Code generation failed", "details": llm_result}
     resolved_data = llm_result.get("data") or llm_result
-            executable_code = resolved_data.get("executable_code")
-            if not executable_code:
+    executable_code = resolved_data.get("executable_code")
+    if not executable_code:
         return {"success": False, "error": "No executable code generated", "details": llm_result}
 
     # Dedent and strip code to avoid indentation errors
     executable_code = textwrap.dedent(executable_code).strip()
-    # Remove or replace input() calls
-    if 'input(' in executable_code:
-        # Remove any line containing input()
-        executable_code = '\n'.join([line for line in executable_code.splitlines() if 'input(' not in line])
-        log_agent_step("Main", "sanitize_code", {"reason": "input() not allowed"}, {"code": executable_code})
-    # Remove or replace raise ValueError or similar error-raising lines
-    if 'raise ValueError' in executable_code or 'raise Exception' in executable_code:
-        executable_code = '\n'.join([line for line in executable_code.splitlines() if not line.strip().startswith('raise ')])
-        log_agent_step("Main", "sanitize_code", {"reason": "raise ValueError/Exception not allowed"}, {"code": executable_code})
-    # Remove any try/except/print lines
-    executable_code = '\n'.join([line for line in executable_code.splitlines() if not (line.strip().startswith('try:') or line.strip().startswith('except') or 'print(' in line)])
-    # Replace any 'if <var> is None:' with '<var> = 0' to avoid empty if blocks (generic, not hardcoded)
-    executable_code = re.sub(r'^\s*if\s+([A-Za-z_][A-Za-z0-9_]*)\s+is\s+None:\s*$', r'\1 = 0', executable_code, flags=re.MULTILINE)
+    
+    # Improved code sanitization
+    executable_code = sanitize_and_fix_code(executable_code, resolved_data.get("parameters", {}))
+    log_agent_step("Main", "sanitize_code", {"reason": "Applied improved sanitization"}, {"code": executable_code})
     # Remove any remaining 'if' lines not followed by an indented block
     lines = executable_code.splitlines()
     cleaned_lines = []
@@ -124,9 +186,36 @@ async def process_query(query):
         return '\n'.join(new_lines)
     executable_code = insert_pass_in_empty_functions(executable_code)
 
-    # 3. Code Execution
+    # 3. Code Execution using CalcExecutor
     calc_executor = CalcExecutor()
-    calc_input = {"operation": "run_python_code", "code": executable_code, "inputs": {}}
+    
+    # Prepare inputs with extracted parameters and dynamic constants
+    execution_inputs = {}
+    
+    # Add extracted parameters from parser
+    if parameters:
+        for param_name, param_info in parameters.items():
+            if isinstance(param_info, dict) and 'value' in param_info:
+                execution_inputs[param_name] = param_info['value']
+            else:
+                execution_inputs[param_name] = param_info
+    
+    # Add common dynamic constants that might be needed
+    try:
+        from config.constants import TimeConstants, EnergyDefaults, FinancialDefaults
+        execution_inputs.update({
+            'HOURS_PER_YEAR': TimeConstants.HOURS_PER_YEAR,
+            'DAYS_PER_YEAR': TimeConstants.DAYS_PER_YEAR,
+            'MONTHS_PER_YEAR': TimeConstants.MONTHS_PER_YEAR,
+            'DEFAULT_CAPACITY_MW': EnergyDefaults.DEFAULT_CAPACITY_MW,
+            'DEFAULT_EFFICIENCY': EnergyDefaults.DEFAULT_EFFICIENCY,
+            'DEFAULT_CAPACITY_FACTOR': EnergyDefaults.DEFAULT_CAPACITY_FACTOR,
+            'DEFAULT_DISCOUNT_RATE': FinancialDefaults.DEFAULT_DISCOUNT_RATE
+        })
+    except ImportError:
+        pass
+    
+    calc_input = {"operation": "run_python_code", "code": executable_code, "inputs": execution_inputs}
     calc_result = await calc_executor.process(calc_input)
     log_agent_step("CalcExecutor", "run_python_code", calc_input, calc_result)
     if not calc_result.get("success"):

@@ -8,9 +8,9 @@ def load_llm_config():
     with open(LLM_CONFIG_PATH, 'r') as f:
         config = json.load(f)
     
-    # Ensure LM Studio is the default provider if not explicitly set
+    # Use the provider specified in the config file
     if 'provider' not in config:
-        config['provider'] = 'lmstudio'
+        config['provider'] = 'openai'  # Default to OpenAI if not specified
     
     return config
 
@@ -153,6 +153,48 @@ def initialize_lmstudio_as_default():
     
     return config
 
+def initialize_llm_provider():
+    """
+    Initialize the LLM provider based on the configured provider in settings.
+    Respects the provider setting in llm_settings.json
+    """
+    config = load_llm_config()
+    provider = config.get('provider', 'openai').lower()
+    
+    print(f"🚀 Initializing LLM Provider with {provider.upper()} as configured provider...")
+    
+    if provider == 'openai':
+        openai_conf = config.get('openai', {})
+        if not openai_conf.get('api_key'):
+            raise ValueError("❌ OpenAI API key not configured")
+        print(f"✅ OpenAI initialized successfully!")
+        print(f"   Model: {openai_conf.get('model', 'gpt-4')}")
+        print(f"   Endpoint: {openai_conf.get('api_base', 'https://api.openai.com/v1')}")
+        print("🎯 All LLM operations will now use OpenAI by default.\n")
+        
+    elif provider == 'lmstudio':
+        lmstudio_conf = config.get('lmstudio', {})
+        if not lmstudio_conf.get('api_base'):
+            raise ValueError("❌ LM Studio API base URL not configured")
+        print(f"✅ LM Studio initialized successfully!")
+        print(f"   Model: {lmstudio_conf.get('model', 'Unknown')}")
+        print(f"   Endpoint: {lmstudio_conf['api_base']}")
+        print("🎯 All LLM operations will now use LM Studio by default.\n")
+        
+    elif provider == 'anthropic':
+        anthropic_conf = config.get('anthropic', {})
+        if not anthropic_conf.get('api_key'):
+            raise ValueError("❌ Anthropic API key not configured")
+        print(f"✅ Anthropic initialized successfully!")
+        print(f"   Model: {anthropic_conf.get('model', 'claude-3-opus-20240229')}")
+        print(f"   Endpoint: {anthropic_conf.get('api_base', 'https://api.anthropic.com/v1')}")
+        print("🎯 All LLM operations will now use Anthropic by default.\n")
+        
+    else:
+        raise ValueError(f"❌ Unsupported provider: {provider}. Supported providers: openai, lmstudio, anthropic")
+    
+    return config
+
 def get_lmstudio_client():
     """
     Get LM Studio client (OpenAI-compatible)
@@ -254,28 +296,15 @@ def get_llm_response(messages: List[Dict[str, str]], **kwargs) -> str:
     kwargs: extra params (e.g., temperature)
     Returns: response text
     
-    Note: This function defaults to LM Studio as the primary provider
+    Note: This function uses the configured provider from llm_settings.json
     """
     config = load_llm_config()
-    provider = config.get('provider', 'lmstudio').lower()  # Default to lmstudio
+    provider = config.get('provider', 'openai').lower()  # Default to openai
     
-    # Ensure LM Studio is the default
-    if provider != 'lmstudio':
-        print(f"⚠️  Provider was set to '{provider}', but LM Studio is the project default. Using LM Studio.")
-        provider = 'lmstudio'
+    print(f"🔧 Using LLM provider: {provider.upper()}")
     
     try:
-        if provider == 'lmstudio':
-            client = get_lmstudio_client()
-            model = config['lmstudio']['model']
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                **kwargs
-            )
-            return response.choices[0].message.content
-            
-        elif provider == 'openai':
+        if provider == 'openai':
             client = get_openai_client()
             model = config['openai']['model']
             # Set default temperature to 1.0 for OpenAI calls
@@ -286,6 +315,16 @@ def get_llm_response(messages: List[Dict[str, str]], **kwargs) -> str:
                 model=model,
                 messages=messages,
                 **openai_kwargs
+            )
+            return response.choices[0].message.content
+            
+        elif provider == 'lmstudio':
+            client = get_lmstudio_client()
+            model = config['lmstudio']['model']
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                **kwargs
             )
             return response.choices[0].message.content
             
@@ -332,18 +371,28 @@ def get_llm_response(messages: List[Dict[str, str]], **kwargs) -> str:
 def chat_completion(messages: List[Dict[str, str]], **kwargs):
     """
     Direct chat completion with full response object
-    Defaults to LM Studio as the primary provider
+    Uses the configured provider from llm_settings.json
     """
     config = load_llm_config()
     provider = config.get('provider', 'openai').lower()  # Default to openai
 
-    # Ensure LM Studio is prioritized
-    if provider != 'lmstudio':
-        print(f"⚠️  Provider was set to '{provider}', but LM Studio is the project default. Using LM Studio.")
-        provider = 'lmstudio'
+    print(f"🔧 Using LLM provider: {provider.upper()}")
     
     try:
-        if provider == 'lmstudio':
+        if provider == 'openai':
+            client = get_openai_client()
+            model = config['openai']['model']
+            # Set default temperature to 1.0 for OpenAI calls
+            openai_kwargs = kwargs.copy()
+            if 'temperature' not in openai_kwargs:
+                openai_kwargs['temperature'] = 1.0
+            return client.chat.completions.create(
+                model=model,
+                messages=messages,
+                **openai_kwargs
+            )
+            
+        elif provider == 'lmstudio':
             client = get_lmstudio_client()
             model = config['lmstudio']['model']
             return client.chat.completions.create(

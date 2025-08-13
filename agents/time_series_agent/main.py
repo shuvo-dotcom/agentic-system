@@ -8,6 +8,7 @@ It can run standalone or be called from the central main.py.
 import asyncio
 import sys
 import json
+from config.constants import EnergyDefaults, FinancialDefaults, TimeConstants
 import logging
 from typing import Dict, Any
 import argparse
@@ -42,10 +43,10 @@ async def mock_calculation_function(query: str, parameters: Dict[str, Any] = Non
     
     # Mock LCOE calculation
     if 'lcoe' in query.lower() or 'levelized' in query.lower():
-        capital_cost = parameters.get('capital_cost', 2000000)
-        om_cost = parameters.get('om_cost', 50000)
-        energy_production = parameters.get('energy_production', 3000)
-        discount_rate = parameters.get('discount_rate', 0.08)
+        capital_cost = parameters.get('capital_cost', FinancialDefaults.DEFAULT_CAPEX_PER_KW * 1000)  # Convert to total project cost
+        om_cost = parameters.get('om_cost', FinancialDefaults.DEFAULT_OPEX_PER_KW_YEAR * 1000)
+        energy_production = parameters.get('energy_production', EnergyDefaults.DEFAULT_CAPACITY_MW * EnergyDefaults.DEFAULT_LOAD_FACTOR * TimeConstants.HOURS_PER_YEAR)
+        discount_rate = parameters.get('discount_rate', FinancialDefaults.DEFAULT_DISCOUNT_RATE)
         project_lifetime = parameters.get('project_lifetime', 25)
         
         # Simple LCOE calculation
@@ -69,9 +70,9 @@ async def mock_calculation_function(query: str, parameters: Dict[str, Any] = Non
     
     # Mock capacity factor calculation
     elif 'capacity' in query.lower():
-        energy_generated = parameters.get('energy_generated', 3000)
-        rated_capacity = parameters.get('rated_capacity', 2)
-        hours_in_year = parameters.get('hours_in_year', 8760)
+        energy_generated = parameters.get('energy_generated', EnergyDefaults.DEFAULT_CAPACITY_MW * EnergyDefaults.DEFAULT_LOAD_FACTOR * TimeConstants.HOURS_PER_YEAR)
+        rated_capacity = parameters.get('rated_capacity', EnergyDefaults.DEFAULT_CAPACITY_MW)
+        hours_in_year = parameters.get('hours_in_year', TimeConstants.HOURS_PER_YEAR)
         
         if rated_capacity > 0 and hours_in_year > 0:
             capacity_factor = energy_generated / (rated_capacity * hours_in_year)

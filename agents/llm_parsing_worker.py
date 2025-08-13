@@ -1,7 +1,6 @@
 import json
 from core.simple_base_agent import SimpleBaseAgent
-from utils.llm_provider import get_llm_response, get_openai_client
-from config.settings import OPENAI_API_KEY
+from utils.llm_provider import get_llm_response, chat_completion
 
 class ParsingWorkerAgent(SimpleBaseAgent):
     """
@@ -9,30 +8,26 @@ class ParsingWorkerAgent(SimpleBaseAgent):
     """
     def __init__(self):
         super().__init__("ParsingWorkerAgent", "Extracts a specific parameter value from a query using LLM.")
-        self.client = get_openai_client()
+        # Using centralized LLM provider
 
     async def extract(self, query: str, parameter: str, model: str = None) -> dict:
-        # Try gpt-4.1-mini first, then gpt-4o, then gpt-4 as fallback if value is null
-        models_to_try = [model] if model else ["gpt-4.1-mini", "gpt-4o", "gpt-4"]
-        for m in models_to_try:
+        # Try different approaches if value is null
+        models_to_try = [model] if model else ["default", "fallback"]
+        for approach in models_to_try:
             prompt = f"""
-You are an expert information extraction agent. Extract the numeric value for the parameter '{parameter}' from the following query. The value may be written as a currency (e.g., $2000/kW), with or without units or symbols. If there are multiple numbers, choose the one most likely to be the value for '{parameter}' based on context. Return only the number, or null if not found, as a JSON object: {{\"value\": <number or null>}}. Do not return any text except the JSON object.
+You are an expert information extraction agent. Extract the numeric value for the parameter '{parameter}' from the following query. The value may be written as a currency (e.g., $2000/kW), with or without units or symbols. If there are multiple numbers, choose the one most likely to be the value for '{parameter}' based on context. Return only the number, or null if not found, as a JSON object: {{"value": <number or null>}}. Do not return any text except the JSON object.
 Query: \"{query}\"
 """
             try:
-                if m in ["gpt-4.1-mini", "gpt-4o"]:
-                    response = self.client.chat.completions.create(
-                        model=m,
-                        response_format={"type": "json_object"},
-                        messages=[{"role": "user", "content": prompt}]
-                    )
+                messages = [{"role": "user", "content": prompt}]
+                
+                if approach in ["default", "gpt-4.1-mini", "gpt-4o"]:
+                    response = chat_completion(messages, response_format={"type": "json_object"})
+                    content = response.choices[0].message.content
                 else:
-                    response = self.client.chat.completions.create(
-                        model=m,
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                content = response.choices[0].message.content
-                print(f"[DEBUG] LLM ({m}) raw output for {parameter}: {content}")
+                    content = get_llm_response(messages)
+                
+                print(f"[DEBUG] LLM ({approach}) raw output for {parameter}: {content}")
                 # Try to parse as a number or null
                 try:
                     parsed = json.loads(content)
@@ -49,32 +44,27 @@ Query: \"{query}\"
                     else:
                         value = None
                 if value is not None:
-                    return {"success": True, "parameter": parameter, "value": value, "raw": content, "model": m}
+                    return {"success": True, "parameter": parameter, "value": value, "raw": content, "model": approach}
             except Exception as e:
-                print(f"[DEBUG] LLM ({m}) error for {parameter}: {e}")
+                print(f"[DEBUG] LLM ({approach}) error for {parameter}: {e}")
                 continue
         return {"success": True, "parameter": parameter, "value": None, "raw": None, "model": models_to_try[-1]}
 
     @staticmethod
-    async def extract_param_names(query: str, model: str = "gpt-4.1-mini") -> list:
-        client = get_openai_client()
+    async def extract_param_names(query: str, model: str = "default") -> list:
         prompt = f"""
 List all parameter names (as a JSON array of strings) that are relevant for calculation in the following query. Only return the JSON array, no extra text.
 Query: \"{query}\"
 """
         try:
-            if model in ["gpt-4.1-mini", "gpt-4o"]:
-                response = client.chat.completions.create(
-                    model=model,
-                    response_format={"type": "json_object"},
-                    messages=[{"role": "user", "content": prompt}]
-                )
+            messages = [{"role": "user", "content": prompt}]
+            
+            if model in ["default", "gpt-4.1-mini", "gpt-4o"]:
+                response = chat_completion(messages, response_format={"type": "json_object"})
+                content = response.choices[0].message.content
             else:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-            content = response.choices[0].message.content
+                content = get_llm_response(messages)
+            
             print(f"[DEBUG] LLM ({model}) param name extraction raw output: {content}")
             # Try to parse as a JSON array
             import json

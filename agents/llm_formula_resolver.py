@@ -1,10 +1,8 @@
 
 import json
 from typing import Any, Dict, List
-
 from core.simple_base_agent import SimpleBaseAgent
-from openai import OpenAI
-from config.settings import OPENAI_API_KEY
+from utils.llm_provider import get_llm_response
 
 class LLMFormulaResolver(SimpleBaseAgent):
     """
@@ -17,7 +15,7 @@ class LLMFormulaResolver(SimpleBaseAgent):
             name="LLMFormulaResolver",
             description="Dynamically identifies formulas, extracts parameters, and generates executable code for calculations using an LLM."
         )
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Using centralized LLM provider
 
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         operation = input_data.get("operation")
@@ -33,23 +31,27 @@ class LLMFormulaResolver(SimpleBaseAgent):
         Uses LLM to identify the metric, formula, parameters, and generate executable Python code.
         """
         try:
-            prompt = f"""You are an expert in energy economics and financial modeling. Your task is to analyze a user\"s query, identify the core metric they want to calculate, determine the relevant formula, extract all necessary parameters from the query (or suggest missing ones), and then generate executable Python code to perform the calculation.
+            prompt = f"""You are an expert in energy economics and financial modeling. Your task is to analyze a user's query, identify the core metric they want to calculate, determine the relevant formula, extract all necessary parameters from the query (or suggest missing ones), and then generate executable Python code to perform the calculation.
 
-            Here\"s the user\"s query: \"{query}\"
+            Here's the user's query: "{query}"
 
             Follow these steps:
-            1. Identify the \"metric_name\" (e.g., \"Levelized Cost of Energy\", \"Net Present Value\", \"Capacity Factor\").
-            2. Provide the \"formula\" in a mathematical expression. Use standard operators (+, -, *, /, **, sum(), etc.). For LCOE, use the form: (CAPEX + sum(OPEX_t[i] / (1 + discount_rate)**(i+1) for i in range(n))) / sum(energy_output_t[i] / (1 + discount_rate)**(i+1) for i in range(n)). For NPV, use: sum(cash_flow_t[i] / (1 + discount_rate)**i for i in range(n+1)).
-            3. List all \"parameters\" required for the formula. For each parameter, provide its \"description\", \"unit\", \"required\" (boolean), and \"value\" (extracted from the query, or null if missing). If a parameter is a time series, indicate it with \"type\": \"list\".
-            4. Generate \"executable_code\" in Python. This code should:
-              - Define the formula as a Python function or direct calculation.
-              - Use the extracted parameters as variables.
-              - Handle time-series parameters (e.g., OPEX_t, energy_output_t, cash_flow_t) as lists.
-              - Include any necessary imports (e.g., math, numpy).
-              - Output the final calculated result by assigning it to a variable named `result`.
-              - Ensure the code is robust and handles potential edge cases or missing parameters by suggesting defaults or asking for user input.
+            1. Identify the "metric_name" (e.g., "Levelized Cost of Energy", "Net Present Value", "Capacity Factor").
+            2. Provide the "formula" in a mathematical expression. Use standard operators (+, -, *, /, **, sum(), etc.). For LCOE, use the form: (CAPEX + sum(OPEX_t[i] / (1 + discount_rate)**(i+1) for i in range(n))) / sum(energy_output_t[i] / (1 + discount_rate)**(i+1) for i in range(n)). For NPV, use: sum(cash_flow_t[i] / (1 + discount_rate)**i for i in range(n+1)).
+            3. List all "parameters" required for the formula. For each parameter, provide its "description", "unit", "required" (boolean), and "value" (extracted from the query, or a reasonable default if missing). If a parameter is a time series, indicate it with "type": "list".
+            4. Generate "executable_code" in Python. This code should:
+              - Start by defining all parameters as variables with their values
+              - Define the formula as a Python function or direct calculation
+              - Use only the defined variables in calculations
+              - Handle time-series parameters (e.g., OPEX_t, energy_output_t, cash_flow_t) as lists
+              - Include any necessary imports (e.g., math, numpy) at the top
+              - Output the final calculated result by assigning it to a variable named `result`
+              - Be self-contained and executable without external input
+              - Use reasonable default values for any missing parameters
 
-            Provide the output as a JSON object ONLY, with the following keys: \"metric_name\", \"formula\", \"parameters\", \"executable_code\". Do NOT include any other text or markdown outside the JSON object.
+            CRITICAL: The executable_code must be completely self-contained. All variables used in calculations must be defined first. Do not use input() or print() statements.
+
+            Provide the output as a JSON object ONLY, with the following keys: "metric_name", "formula", "parameters", "executable_code". Do NOT include any other text or markdown outside the JSON object.
 
             Example for LCOE:
             {{
@@ -96,16 +98,11 @@ class LLMFormulaResolver(SimpleBaseAgent):
             Query: \"{query}\"
             Output:
             """
-            response = self.client.chat.completions.create(
-                model="gpt-4.1-mini", # Changed model here
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
             
-            content = response.choices[0].message.content
-            parsed_content = json.loads(content)
+            messages = [{"role": "user", "content": prompt}]
+            response_text = get_llm_response(messages, response_format={"type": "json_object"})
+            
+            parsed_content = json.loads(response_text)
             
             return self.create_success_response(parsed_content)
 

@@ -9,8 +9,8 @@ import json
 import asyncio
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-from openai import OpenAI
-from config.settings import OPENAI_API_KEY, OPENAI_MODEL
+from utils.llm_provider import get_llm_response, chat_completion
+from config.constants import TimeConstants
 
 @dataclass
 class ExtractedParameter:
@@ -26,10 +26,8 @@ class DynamicParameterExtractor:
     """Dynamically extracts parameters from queries using LLM reasoning."""
     
     def __init__(self):
-        try:
-            self.client = OpenAI(api_key=OPENAI_API_KEY)
-        except ImportError:
-            self.client = None
+        # Using centralized LLM provider - no need for direct client initialization
+        pass
 
     async def extract_parameters_with_llm(self, query: str, calculation_type: str) -> Dict[str, ExtractedParameter]:
         """
@@ -42,9 +40,6 @@ class DynamicParameterExtractor:
         Returns:
             Dictionary of extracted parameters
         """
-        if self.client is None:
-            return self._extract_parameters_fallback(query)
-        
         try:
             prompt = f"""
 You are an expert energy analyst. Extract all relevant parameters from the following query for {calculation_type} calculation.
@@ -63,9 +58,14 @@ For each parameter you find:
 Consider ANY parameters that could be relevant, including but not limited to:
 - Financial parameters (costs, prices, rates, investments)
 - Technical parameters (capacity, production, efficiency, ratings)
-- Temporal parameters (lifetimes, periods, durations)
+- Temporal parameters (lifetimes, periods, durations - NOTE: for time_period, prefer years over hours when possible)
 - Environmental parameters (temperatures, conditions, factors)
 - Operational parameters (maintenance, operational costs, performance)
+
+IMPORTANT: For time_period parameter:
+- If the query mentions "for a year" or "annual", set time_period to 1 year
+- If the query mentions "8760 hours", convert this to 1 year
+- Always prefer years as the unit for time_period when doing time series analysis
 
 Return your response as a JSON object with this structure:
 {{
@@ -108,18 +108,20 @@ Example for "Calculate LCOE for a 2 MW wind turbine with 3000 MWh production ove
 }}
 """
 
+            
+            messages = [
+                {"role": "system", "content": "You are an expert energy analyst specializing in dynamic parameter extraction. Extract ALL relevant parameters from any query without being limited by predefined patterns."},
+                {"role": "user", "content": prompt}
+            ]
+            
             response = await asyncio.to_thread(
-                self.client.chat.completions.create,
-                model=OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": "You are an expert energy analyst specializing in dynamic parameter extraction. Extract ALL relevant parameters from any query without being limited by predefined patterns."},
-                    {"role": "user", "content": prompt}
-                ],
+                get_llm_response,
+                messages,
                 temperature=0.1,
                 max_tokens=1000
             )
             
-            content = response.choices[0].message.content.strip()
+            content = response.strip()
             
             # Extract JSON from response
             try:
@@ -232,9 +234,6 @@ Example for "Calculate LCOE for a 2 MW wind turbine with 3000 MWh production ove
         Returns:
             List of missing parameter names
         """
-        if self.client is None:
-            return self._get_missing_parameters_fallback(extracted_params, calculation_type)
-        
         try:
             extracted_names = list(extracted_params.keys())
             
@@ -261,18 +260,20 @@ Example for LCOE calculation:
 }}
 """
 
+            
+            messages = [
+                {"role": "system", "content": "You are an expert energy analyst specializing in parameter requirements."},
+                {"role": "user", "content": prompt}
+            ]
+            
             response = await asyncio.to_thread(
-                self.client.chat.completions.create,
-                model=OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": "You are an expert energy analyst specializing in parameter requirements."},
-                    {"role": "user", "content": prompt}
-                ],
+                get_llm_response,
+                messages,
                 temperature=0.1,
                 max_tokens=400
             )
             
-            content = response.choices[0].message.content.strip()
+            content = response.strip()
             
             try:
                 start_idx = content.find('{')
@@ -315,7 +316,7 @@ Example for LCOE calculation:
         Returns:
             Dictionary of suggested default values
         """
-        if not missing_params or self.client is None:
+        if not missing_params:
             return {}
         
         try:
@@ -353,18 +354,20 @@ Example:
 }}
 """
 
+            
+            messages = [
+                {"role": "system", "content": "You are an expert energy analyst specializing in parameter estimation."},
+                {"role": "user", "content": prompt}
+            ]
+            
             response = await asyncio.to_thread(
-                self.client.chat.completions.create,
-                model=OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": "You are an expert energy analyst specializing in parameter estimation."},
-                    {"role": "user", "content": prompt}
-                ],
+                get_llm_response,
+                messages,
                 temperature=0.3,
                 max_tokens=600
             )
             
-            content = response.choices[0].message.content.strip()
+            content = response.strip()
             
             try:
                 start_idx = content.find('{')
@@ -380,6 +383,163 @@ Example:
             print(f"LLM suggestion failed: {e}")
         
         return {}
+
+    async def _normalize_time_period_with_llm(self, time_value: float, time_unit: str, query: str) -> Dict[str, Any]:
+        """
+        Use LLM to intelligently normalize time periods for time series analysis.
+        
+        Args:
+            time_value: The numerical time value
+            time_unit: The unit of time
+            query: Original query for context
+            
+        Returns:
+            Dictionary with normalized time value and reasoning
+        """
+        try:
+            prompt = f"""
+You are an expert in time series analysis. I need to normalize a time period for time series forecasting.
+
+Original query: "{query}"
+Time value: {time_value}
+Time unit: {time_unit}
+
+For time series analysis, we typically work with years as the primary unit. Please:
+
+1. Determine if this time period makes sense for time series analysis
+2. Convert it to an appropriate number of years if needed
+3. Consider the context of the original query
+
+Common conversions:
+- {TimeConstants.HOURS_PER_YEAR} hours = 1 year (standard year)
+- {TimeConstants.HOURS_PER_YEAR + 24} hours = 1 year (leap year)
+- {TimeConstants.MONTHS_PER_YEAR} months = 1 year
+- {TimeConstants.DAYS_PER_YEAR} days = 1 year
+- 52 weeks = 1 year
+
+Return your response as JSON:
+{{
+    "normalized_value": float,
+    "normalized_unit": "years",
+    "reasoning": "explanation of the conversion",
+    "confidence": float,
+    "is_single_period": bool
+}}
+
+Examples:
+- {TimeConstants.HOURS_PER_YEAR} hours → {{"normalized_value": 1.0, "normalized_unit": "years", "reasoning": "{TimeConstants.HOURS_PER_YEAR} hours is standard hours in a year", "confidence": 0.95, "is_single_period": true}}
+- 5 years → {{"normalized_value": 5.0, "normalized_unit": "years", "reasoning": "Already in years, no conversion needed", "confidence": 1.0, "is_single_period": false}}
+- {TimeConstants.MONTHS_PER_YEAR * 2} months → {{"normalized_value": 2.0, "normalized_unit": "years", "reasoning": "{TimeConstants.MONTHS_PER_YEAR * 2} months equals 2 years", "confidence": 0.9, "is_single_period": false}}
+"""
+
+            
+            messages = [
+                {"role": "system", "content": "You are an expert in time series analysis and unit conversions. Always provide accurate time normalizations."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            response = await asyncio.to_thread(
+                get_llm_response,
+                messages,
+                temperature=0.1,
+                max_tokens=300
+            )
+            
+            content = response.strip()
+            
+            # Extract JSON from response
+            start_idx = content.find('{')
+            end_idx = content.rfind('}') + 1
+            if start_idx != -1 and end_idx != 0:
+                json_str = content[start_idx:end_idx]
+                result = json.loads(json_str)
+                return result
+            
+        except Exception as e:
+            print(f"⚠️  LLM time normalization failed: {e}")
+        
+        # Fallback to rule-based approach
+        return self._normalize_time_period_fallback(time_value, time_unit)
+
+    def _normalize_time_period_fallback(self, time_value: float, time_unit: str) -> Dict[str, Any]:
+        """
+        Fallback rule-based time period normalization.
+        
+        Args:
+            time_value: The numerical time value
+            time_unit: The unit of time
+            
+        Returns:
+            Dictionary with normalized time value and reasoning
+        """
+        time_unit_lower = time_unit.lower() if time_unit else ""
+        
+        # Rule-based conversions
+        if 'hour' in time_unit_lower:
+            if abs(time_value - TimeConstants.HOURS_PER_YEAR) < 100:  # Close to standard year
+                return {
+                    "normalized_value": 1.0,
+                    "normalized_unit": "years",
+                    "reasoning": f"{time_value} hours is approximately 1 year ({TimeConstants.HOURS_PER_YEAR} hours)",
+                    "confidence": 0.9,
+                    "is_single_period": True
+                }
+            elif time_value > 1000:  # Large number of hours
+                years = time_value / TimeConstants.HOURS_PER_YEAR
+                return {
+                    "normalized_value": round(years, 2),
+                    "normalized_unit": "years",
+                    "reasoning": f"{time_value} hours converted to {round(years, 2)} years",
+                    "confidence": 0.8,
+                    "is_single_period": years <= 1
+                }
+        
+        elif 'month' in time_unit_lower:
+            years = time_value / TimeConstants.MONTHS_PER_YEAR
+            return {
+                "normalized_value": round(years, 2),
+                "normalized_unit": "years",
+                "reasoning": f"{time_value} months converted to {round(years, 2)} years",
+                "confidence": 0.9,
+                "is_single_period": years <= 1
+            }
+        
+        elif 'day' in time_unit_lower:
+            if abs(time_value - TimeConstants.DAYS_PER_YEAR) < 10:  # Close to standard year
+                return {
+                    "normalized_value": 1.0,
+                    "normalized_unit": "years",
+                    "reasoning": f"{time_value} days is approximately 1 year",
+                    "confidence": 0.9,
+                    "is_single_period": True
+                }
+            elif time_value > 30:  # More than a month
+                years = time_value / TimeConstants.DAYS_PER_YEAR
+                return {
+                    "normalized_value": round(years, 2),
+                    "normalized_unit": "years",
+                    "reasoning": f"{time_value} days converted to {round(years, 2)} years",
+                    "confidence": 0.8,
+                    "is_single_period": years <= 1
+                }
+        
+        elif 'year' in time_unit_lower or 'yr' in time_unit_lower:
+            return {
+                "normalized_value": time_value,
+                "normalized_unit": "years",
+                "reasoning": "Already in years, no conversion needed",
+                "confidence": 1.0,
+                "is_single_period": time_value <= 1
+            }
+        
+        # Default: assume it's already in appropriate units
+        return {
+            "normalized_value": time_value,
+            "normalized_unit": "years",
+            "reasoning": f"Unable to determine unit conversion, using {time_value} as-is",
+            "confidence": 0.5,
+            "is_single_period": time_value <= 1
+        }
 
     def convert_to_calculation_format(self, 
                                     extracted_params: Dict[str, ExtractedParameter],
@@ -405,5 +565,58 @@ Example:
             for param_name, default_data in suggested_defaults.items():
                 if param_name not in calculation_params:
                     calculation_params[param_name] = default_data['value']
+        
+        return calculation_params
+
+    async def convert_to_calculation_format_with_normalization(self, 
+                                                             extracted_params: Dict[str, ExtractedParameter],
+                                                             suggested_defaults: Dict[str, Dict[str, Any]] = None,
+                                                             query: str = "") -> Dict[str, float]:
+        """
+        Convert extracted parameters to calculation format with intelligent time period normalization.
+        
+        Args:
+            extracted_params: Extracted parameters
+            suggested_defaults: Suggested default values
+            query: Original query for context
+            
+        Returns:
+            Dictionary of parameters in calculation format
+        """
+        calculation_params = {}
+        
+        # Add extracted parameters
+        for param_name, param in extracted_params.items():
+            calculation_params[param_name] = param.value
+        
+        # Add suggested defaults for missing parameters
+        if suggested_defaults:
+            for param_name, default_data in suggested_defaults.items():
+                if param_name not in calculation_params:
+                    calculation_params[param_name] = default_data['value']
+        
+        # Intelligent time period normalization
+        if 'time_period' in calculation_params:
+            time_value = calculation_params['time_period']
+            
+            # Get time unit from various sources
+            time_unit = ""
+            if suggested_defaults and 'time_period' in suggested_defaults:
+                time_unit = suggested_defaults['time_period'].get('unit', '')
+            elif 'time_period' in extracted_params:
+                time_unit = extracted_params['time_period'].unit
+            
+            # Use intelligent normalization
+            normalization_result = await self._normalize_time_period_with_llm(
+                time_value, time_unit, query
+            )
+            
+            if normalization_result['normalized_value'] != time_value:
+                calculation_params['time_period'] = normalization_result['normalized_value']
+                print(f"🧠 {normalization_result['reasoning']}")
+                print(f"   Confidence: {normalization_result['confidence']:.1%}")
+                
+                # Store metadata for downstream use
+                calculation_params['_time_period_metadata'] = normalization_result
         
         return calculation_params 

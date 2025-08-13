@@ -15,13 +15,10 @@ class PromptDecomposerAgent:
     """
     def __init__(self, api_key: Optional[str] = None, config_path: Optional[str] = None):
         self.api_key = api_key
-        self.llm_client = None
-        if api_key:
-            try:
-                from utils.llm_provider import get_openai_client
-                self.llm_client = get_openai_client()
-            except ImportError:
-                self.llm_client = None
+        # Using centralized LLM provider
+        from utils.llm_provider import get_llm_response
+        self.get_llm_response = get_llm_response
+        
         # Load config-driven lists for metrics
         self.config = self._load_config(config_path)
         self.metrics = self.config.get("metrics", [
@@ -181,25 +178,24 @@ class PromptDecomposerAgent:
                     if sub not in sub_prompts:
                         sub_prompts.append(sub)
         
-        if len(sub_prompts) == 1 and self.llm_client:
+        if len(sub_prompts) == 1:
             return self._llm_decompose(prompt)
         return sub_prompts if sub_prompts else [prompt]
 
     def _llm_decompose(self, prompt: str) -> List[str]:
-        if not self.llm_client:
-            return [prompt]
-            
-        response = self.llm_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
+        try:
+            messages = [
                 {"role": "system", "content": "You are a helpful assistant that breaks down a complex analysis prompt into a list of atomic, non-overlapping sub-prompts, each focused on a single entity, metric, and time period. Reply with a numbered list."},
                 {"role": "user", "content": prompt}
-            ],
-            max_tokens=256,
-            temperature=0
-        )
-        if response and response.choices and response.choices[0].message and response.choices[0].message.content:
-            lines = response.choices[0].message.content.strip().split('\n')
-            sub_prompts = [re.sub(r"^\d+\.\s*", "", line).strip() for line in lines if line.strip()]
-            return [sp for sp in sub_prompts if sp]
+            ]
+            
+            response_text = self.get_llm_response(messages, max_tokens=256, temperature=0)
+            
+            if response_text:
+                lines = response_text.strip().split('\n')
+                sub_prompts = [re.sub(r"^\d+\.\s*", "", line).strip() for line in lines if line.strip()]
+                return [sp for sp in sub_prompts if sp]
+        except Exception as e:
+            print(f"LLM decomposition failed: {e}")
+            
         return [prompt]
