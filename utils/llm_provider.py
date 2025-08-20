@@ -4,6 +4,9 @@ from typing import List, Dict, Any, Optional
 
 LLM_CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', 'config', 'llm_settings.json')
 
+# Feature flag to enable/disable Langfuse
+ENABLE_LANGFUSE = os.getenv("ENABLE_LANGFUSE", "true").lower() == "true"
+
 def load_llm_config():
     with open(LLM_CONFIG_PATH, 'r') as f:
         config = json.load(f)
@@ -28,21 +31,53 @@ def _setup_langfuse_env():
 
 def get_openai_client():
     """
-    Get OpenAI client with Langfuse integration
+    Get OpenAI client with optional Langfuse integration
     Returns: OpenAI client instance
     """
     config = load_llm_config()
     openai_conf = config['openai']
     
-    # Setup Langfuse environment variables
-    _setup_langfuse_env()
+    # Check for runtime environment variable (takes precedence)
+    enable_langfuse = os.getenv("ENABLE_LANGFUSE", "").lower()
+    if enable_langfuse == "":
+        # No runtime variable, use the default
+        use_langfuse = ENABLE_LANGFUSE
+    else:
+        # Use the runtime variable value
+        use_langfuse = enable_langfuse == "true"
     
-    # Always use Langfuse OpenAI for tracing and monitoring
-    from langfuse.openai import OpenAI
-    client = OpenAI(
-        api_key=openai_conf['api_key'], 
-        base_url=openai_conf.get('api_base', 'https://api.openai.com/v1')
-    )
+    # Force disable Langfuse for now to fix the errors
+    use_langfuse = False
+    
+    if use_langfuse:
+        # Try to use Langfuse OpenAI for tracing and monitoring
+        try:
+            _setup_langfuse_env()
+            from langfuse.openai import OpenAI
+            client = OpenAI(
+                api_key=openai_conf['api_key'], 
+                base_url=openai_conf.get('api_base', 'https://api.openai.com/v1')
+            )
+            print("✅ Langfuse monitoring enabled")
+        except Exception as e:
+            print(f"⚠️ Langfuse integration failed: {str(e)}. Falling back to standard OpenAI.")
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=openai_conf['api_key'], 
+                base_url=openai_conf.get('api_base', 'https://api.openai.com/v1')
+            )
+    else:
+        # Use standard OpenAI client without Langfuse
+        try:
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=openai_conf['api_key'], 
+                base_url=openai_conf.get('api_base', 'https://api.openai.com/v1')
+            )
+            print("ℹ️ Langfuse monitoring disabled")
+        except Exception as e:
+            print(f"⚠️ Error initializing OpenAI client: {str(e)}")
+            raise
     return client
 
 def get_embedding_client():
