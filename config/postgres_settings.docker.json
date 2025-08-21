@@ -1,0 +1,7 @@
+{
+    "postgres_api_endpoint": "http://host.docker.internal:5678/webhook/sql-query",
+    "api_key": "",
+    "connection_timeout": 30,
+    "max_retries": 3,
+    "retry_delay": 2
+}

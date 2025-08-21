@@ -293,7 +293,113 @@ class OrchestratorAgent:
                         if isinstance(result, dict) and result.get("missing_parameters"):
                             self.logger.warning(f"Missing parameters detected: {result['missing_parameters']}")
                             
-                            # First, try to resolve parameters using CSV data if available
+                            # First, try to resolve parameters using PostgreSQL data with self-healing capability
+                            if hasattr(self, 'postgres_provider') and hasattr(self, '_fetch_postgres_data'):
+                                self.logger.info("[Postgres Integration] Attempting to resolve parameters using PostgreSQL data with self-healing")
+                                
+                                # Generate a specific parameter query
+                                param_query = f"What are the values for {', '.join(result['missing_parameters'])} in the context of {sub}?"
+                                
+                                # Fetch PostgreSQL data with self-healing enabled
+                                postgres_result = await self._fetch_postgres_data(
+                                    param_query, 
+                                    session_id=str(session_id)
+                                )
+                                
+                                # Process the parameters if data was successfully retrieved
+                                if postgres_result and postgres_result.get("status") == "success":
+                                    self.logger.info(f"[Postgres Integration] Successfully retrieved parameter data")
+                                    
+                                    # Extract parameters from PostgreSQL data
+                                    postgres_data = postgres_result.get("data", {})
+                                    postgres_params = {}
+                                    
+                                    # Check if we have PostgreSQL data to work with
+                                    if postgres_data and isinstance(postgres_data, (dict, list)):
+                                        # Convert to a list if it's a dictionary
+                                        if isinstance(postgres_data, dict):
+                                            postgres_data_list = [postgres_data]
+                                        else:
+                                            postgres_data_list = postgres_data
+                                            
+                                        # Log the available data for debugging
+                                        self.logger.info(f"[Postgres Integration] Available data fields: {list(postgres_data_list[0].keys()) if postgres_data_list else 'None'}")
+                                        
+                                        # Use LLM to smartly extract parameters from the data
+                                        params_extraction_prompt = f"""
+                                        Extract values for these parameters from the PostgreSQL data:
+                                        Required parameters: {result['missing_parameters']}
+                                        
+                                        Available data:
+                                        {json.dumps(postgres_data_list[:5], indent=2)}
+                                        
+                                        Original query context:
+                                        {sub}
+                                        
+                                        Return a JSON object mapping each parameter to the appropriate value from the data.
+                                        If a parameter is not available in the data, leave it as null.
+                                        For example: {{"param_name": extracted_value, "param2": null}}
+                                        
+                                        Extraction rules:
+                                        - For energy_output_t: Look for values like "total_generation", "annual_energy_output", etc.
+                                        - For n: Look for values like "operational_reactors", "number_of_units", etc.
+                                        - Prefer actual numeric values over null/placeholder values
+                                        - Include units in the parameter value when appropriate (e.g., "1000 GWh")
+                                        - Be smart about interpreting the data in the context of the query
+                                        """
+                                        
+                                        extraction_messages = [
+                                            {"role": "system", "content": "You are an expert data analyst who extracts parameter values from database results. Return only valid JSON."},
+                                            {"role": "user", "content": params_extraction_prompt}
+                                        ]
+                                        
+                                        try:
+                                            from utils.llm_provider import get_llm_response
+                                            extraction_response = get_llm_response(extraction_messages, temperature=0.1)
+                                            
+                                            # Clean the response - remove markdown code blocks if present
+                                            cleaned_response = extraction_response.strip()
+                                            if cleaned_response.startswith('```json'):
+                                                cleaned_response = cleaned_response[7:]  # Remove ```json
+                                            if cleaned_response.startswith('```'):
+                                                cleaned_response = cleaned_response[3:]   # Remove ```
+                                            if cleaned_response.endswith('```'):
+                                                cleaned_response = cleaned_response[:-3]  # Remove trailing ```
+                                            
+                                            # Parse the extracted parameters
+                                            postgres_params = json.loads(cleaned_response)
+                                            
+                                            # Log the extracted parameters
+                                            self.logger.info(f"[Postgres Integration] Extracted parameters: {postgres_params}")
+                                            
+                                            # Filter out null values
+                                            postgres_params = {k: v for k, v in postgres_params.items() if v is not None}
+                                            
+                                            # Update the filled parameters with extracted values
+                                            for param, value in postgres_params.items():
+                                                if param in result["missing_parameters"]:
+                                                    self.logger.info(f"[Postgres Integration] Using value '{value}' for parameter '{param}' from PostgreSQL data")
+                                                    filled_params[param] = value
+                                                    
+                                                    # Check for direct parameters from the Postgres response
+                                                    if postgres_result.get("parameters") and param in postgres_result["parameters"]:
+                                                        direct_value = postgres_result["parameters"][param]
+                                                        if direct_value is not None:
+                                                            self.logger.info(f"[Postgres Integration] Overriding with direct value '{direct_value}' for parameter '{param}'")
+                                                            filled_params[param] = direct_value
+                                                            
+                                                    # Also check in the data.parameters path (used by the postgres_data_provider)
+                                                    if postgres_result.get("data") and isinstance(postgres_result["data"], dict) and "parameters" in postgres_result["data"]:
+                                                        data_params = postgres_result["data"]["parameters"]
+                                                        if param in data_params and data_params[param] is not None:
+                                                            self.logger.info(f"[Postgres Integration] Using data.parameters value '{data_params[param]}' for parameter '{param}'")
+                                                            filled_params[param] = data_params[param]
+                                                    
+                                                    result["missing_parameters"].remove(param)
+                                        except Exception as e:
+                                            self.logger.error(f"[Postgres Integration] Failed to extract parameters: {str(e)}")
+                                
+                            # Second, try to resolve parameters using CSV data if available
                             if hasattr(self, '_resolve_parameters_from_csv'):
                                 self.logger.info("[CSV Integration] Attempting to resolve parameters using CSV data")
                                 csv_resolved_params = await self._resolve_parameters_from_csv(

@@ -17,19 +17,23 @@ The Agentic System is designed as a modular, multi-agent architecture that proce
 ├─────────────────────────────────────────────────────────────┤
 │                    Agent Layer                              │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
-│  │ Plexos   │ │   Data   │ │   RAG    │ │ Formula  │      │
-│  │ Loader   │ │Harvester │ │ Indexer  │ │Resolver  │      │
+│  │ Plexos   │ │PostgreSQL│ │   Data   │ │   RAG    │      │
+│  │ Loader   │ │Provider  │ │Harvester │ │ Indexer  │      │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐                   │
-│  │   Calc   │ │    QC    │ │ Exporter │                   │
-│  │Executor  │ │ Auditor  │ │          │                   │
-│  └──────────┘ └──────────┘ └──────────┘                   │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │ Formula  │ │   Calc   │ │    QC    │ │ Exporter │      │
+│  │Resolver  │ │Executor  │ │ Auditor  │ │          │      │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
 ├─────────────────────────────────────────────────────────────┤
 │                    Data Layer                               │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
 │  │ Plexos   │ │ Vector   │ │   SQL    │ │ External │      │
 │  │   DB     │ │   DB     │ │   DB     │ │   APIs   │      │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
+│  ┌───────────────┐                                        │
+│  │ PostgreSQL    │                                        │
+│  │ Data Provider │                                        │
+│  └───────────────┘                                        │
 ├─────────────────────────────────────────────────────────────┤
 │                 External Services                           │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐                   │
@@ -194,10 +198,40 @@ async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
 **Export Formats**:
 - JSON: Structured data with formatting options
 - Markdown: Human-readable documentation
-- CSV: Spreadsheet-compatible data
-- XML: Structured markup
-- HTML: Web-ready with styling
-- PDF: Professional reports
+
+### 8. PostgresDataProvider
+
+**Purpose**: Connect to external PostgreSQL-based data API endpoints for precise data retrieval with self-healing capabilities
+
+**Capabilities**:
+- Query refinement for structured data requests
+- Self-healing query generation for progressive constraint relaxation
+- API connection management with retry logic
+- Intelligent parameter extraction
+- Integration with the orchestrator workflow
+- Fallback handling for API failures
+
+**Features**:
+- Smart query refinement to improve data specificity
+- Self-healing system that progressively relaxes query constraints when initial queries fail
+- Multiple fallback strategies based on constraint types:
+  - Time constraint relaxation
+  - Geographic scope expansion
+  - Energy metric simplification
+  - General constraint removal
+- Connection pooling and timeout management
+- Error handling with exponential backoff
+- Comprehensive query attempt tracking
+- Data validation and transformation
+- Configurable via settings file or environment variables
+
+**Self-Healing Query Architecture**:
+- Initial queries are highly specific and constrained
+- On failure, the system uses LLM to generate fallback queries with relaxed constraints
+- Each fallback attempt targets different constraint types in a logical progression
+- All query attempts are tracked with detailed metadata
+- The system returns partial success if any fallback attempt succeeds
+- Complete documentation available in `docs/self_healing_queries.md`
 
 ## Data Flow Architecture
 

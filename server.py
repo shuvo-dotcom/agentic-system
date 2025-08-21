@@ -44,10 +44,35 @@ def format_orchestrator_response(result: Dict[str, Any], original_query: str) ->
         formatted_response = f"🔍 **Analysis Results for:** {original_query}\n"
         formatted_response += "=" * 60 + "\n\n"
         
+        # Check if PostgreSQL data was used
+        if 'postgres_data_used' in result:
+            postgres_info = result['postgres_data_used']
+            formatted_response += "🛢️ **PostgreSQL Data Source Integration**\n"
+            formatted_response += f"   • Source: {postgres_info.get('metadata', {}).get('data_source', 'PostgreSQL API')}\n"
+            
+            # Show self-healing information if available
+            if 'self_healing' in postgres_info:
+                healing_info = postgres_info['self_healing']
+                attempts = healing_info.get('attempts', 1)
+                
+                if attempts > 1:  # Self-healing was used
+                    formatted_response += f"   • 🔄 **Self-Healing Query Feature Active**\n"
+                    formatted_response += f"   • Query attempts: {attempts}\n"
+                    formatted_response += f"   • Success level: {healing_info.get('success_level', 'unknown')}\n"
+                    
+                    # Add some details about the query progression
+                    if 'query_progression' in healing_info:
+                        query_progression = healing_info['query_progression']
+                        if len(query_progression) > 1:
+                            formatted_response += f"   • Initial query: {query_progression[0]['query'][:80]}...\n"
+                            formatted_response += f"   • Final query: {query_progression[-1]['query'][:80]}...\n"
+            
+            formatted_response += "\n"
+            
         # Check if CSV data was used
         if 'csv_data_used' in result:
             csv_info = result['csv_data_used']
-            formatted_response += "📊 **Data Source Integration**\n"
+            formatted_response += "📊 **CSV Data Source Integration**\n"
             formatted_response += f"   • File: {csv_info.get('file_name', 'N/A')}\n"
             formatted_response += f"   • Records analyzed: {csv_info.get('data_summary', {}).get('total_records', 'N/A'):,}\n"
             formatted_response += f"   • Selection confidence: {csv_info.get('selection_confidence', 'N/A'):.1%}\n"

@@ -19,12 +19,13 @@ The system follows a multi-agent architecture with the following key components:
 ### Specialized Agents
 
 1. **PlexosCSVLoader**: Loads and processes Plexos energy modeling CSV files
-2. **DataHarvester**: Retrieves data from external sources and APIs
-3. **RAGIndexer**: Builds searchable vector and SQL indices for knowledge retrieval
-4. **FormulaResolver**: Identifies required metrics and retrieves canonical formulas
-5. **CalcExecutor**: Executes numeric computations using Python sandbox
-6. **QCAuditor**: Validates results for accuracy, unit consistency, and citations
-7. **Exporter**: Formats and exports final answers in various formats
+2. **PostgresDataProvider**: Connects to external PostgreSQL endpoints for real-time data retrieval with self-healing query capabilities
+3. **DataHarvester**: Retrieves data from external sources and APIs
+4. **RAGIndexer**: Builds searchable vector and SQL indices for knowledge retrieval
+5. **FormulaResolver**: Identifies required metrics and retrieves canonical formulas
+6. **CalcExecutor**: Executes numeric computations using Python sandbox
+7. **QCAuditor**: Validates results for accuracy, unit consistency, and citations
+8. **Exporter**: Formats and exports final answers in various formats
 
 ## Features
 
@@ -38,6 +39,8 @@ The system follows a multi-agent architecture with the following key components:
 
 ### Data Integration
 - Plexos database integration
+- PostgreSQL data provider for precise data retrieval with self-healing queries
+- Progressive constraint relaxation for robust data retrieval
 - External API data harvesting
 - Vector database for semantic search
 - SQL database for structured queries
