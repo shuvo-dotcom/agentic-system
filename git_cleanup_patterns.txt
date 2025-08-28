@@ -1,9 +1,0 @@
-# OpenAI API Keys
-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==>REMOVED-API-KEY
-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==>REMOVED-API-KEY
-
-# Project IDs
-proj_hq4gfL5gbCQvZEKgV4PNLQz0==>REMOVED-PROJECT-ID
-
-# MongoDB Connection String
-mongodb\+srv://test_toconnect:BPhKfz73xEcHw5lz@cluster0.d5dfq.mongodb.net/\?retryWrites=true&w=majority&appName=Cluster0==>mongodb://localhost:27017/
