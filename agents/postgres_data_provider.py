@@ -13,6 +13,27 @@ import asyncio
 from core.simple_base_agent import SimpleBaseAgent
 from utils.llm_provider import get_llm_response
 
+async def async_get_llm_response(prompt=None, messages=None, **kwargs):
+    """
+    Async wrapper for get_llm_response to handle async calls properly.
+    This function ensures messages are properly formatted.
+    """
+    # Make sure we handle prompt vs messages correctly
+    if prompt is not None and messages is None:
+        # If prompt is provided but not messages, create a user message
+        messages = [{"role": "user", "content": prompt}]
+        prompt = None
+    
+    # If system_prompt is provided, handle it properly
+    system_prompt = kwargs.pop("system_prompt", None)
+    if system_prompt and isinstance(messages, list):
+        # Insert system prompt at the beginning if it's not already there
+        if not any(msg.get("role") == "system" for msg in messages):
+            messages.insert(0, {"role": "system", "content": system_prompt})
+    
+    # Use synchronous version but await to be compatible with async code
+    return get_llm_response(messages=messages, prompt=prompt, **kwargs)
+
 def load_postgres_config():
     """Load PostgreSQL API configuration from file or environment variables"""
     config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'postgres_settings.json')
@@ -596,7 +617,12 @@ class PostgresDataProvider(SimpleBaseAgent):
         
         # Get the fallback query from the LLM
         try:
-            fallback_query = await get_llm_response(prompt, max_tokens=300, temperature=0.3, system_prompt="You are an expert PostgreSQL data engineer. Your task is to modify SQL queries to make them less restricted when they fail.")
+            fallback_query = await async_get_llm_response(
+                prompt=prompt, 
+                max_tokens=300, 
+                temperature=0.3, 
+                system_prompt="You are an expert PostgreSQL data engineer. Your task is to modify SQL queries to make them less restricted when they fail."
+            )
             
             # Clean up the response
             fallback_query = fallback_query.strip()
@@ -723,7 +749,12 @@ class PostgresDataProvider(SimpleBaseAgent):
         """
         
         try:
-            refined_query = await get_llm_response(prompt, max_tokens=300, temperature=0.1, system_prompt="You are an expert PostgreSQL engineer who specializes in creating efficient, precise SQL queries from natural language requests.")
+            refined_query = await async_get_llm_response(
+                prompt=prompt, 
+                max_tokens=300, 
+                temperature=0.1, 
+                system_prompt="You are an expert PostgreSQL engineer who specializes in creating efficient, precise SQL queries from natural language requests."
+            )
             
             # Clean up the response
             refined_query = refined_query.strip()

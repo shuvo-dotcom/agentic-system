@@ -8,13 +8,26 @@ def get_langfuse():
     global _lf
     if _lf is None:
         try:
+            import os
+            # Use environment variables with fallback to the hardcoded values
+            public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "pk-lf-local-development-key")
+            secret_key = os.getenv("LANGFUSE_SECRET_KEY", "sk-lf-local-development-key")
+            host = os.getenv("LANGFUSE_HOST", "http://localhost:3001")
+            
+            is_local = "localhost" in host or "127.0.0.1" in host
+            
             _lf = Langfuse(
-                public_key="pk-lf-18da7bf3-d09d-4737-b866-cbdb41cfcc2c",
-                secret_key="sk-lf-9be76db0-8a1a-4662-89d0-e9a00460e10c",
-                host="http://localhost:3001"
+                public_key=public_key,
+                secret_key=secret_key,
+                host=host
             )
+            
+            if is_local:
+                print(f"[Langfuse] 🔄 Using local Langfuse instance at {host}")
+            else:
+                print(f"[Langfuse] 🌐 Connected to cloud Langfuse at {host}")
         except Exception as e:
-            print(f"[Langfuse] Failed to initialize: {e}")
+            print(f"[Langfuse] ❌ Failed to initialize: {e}")
             _lf = None
     return _lf
 

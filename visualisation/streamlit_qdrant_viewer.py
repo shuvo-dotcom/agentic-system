@@ -11,11 +11,12 @@ st.markdown('---')
 
 session_id = st.text_input('Enter Session ID for Call Tree', '')
 
-# Load Qdrant config
+# Load Qdrant config and environment variables
 with open('config/log_agent_settings.json', 'r') as f:
     log_config = json.load(f)
 qdrant_url = log_config['qdrant_url']
-openai_api_key = log_config['openai_api_key']
+# Prioritize environment variable for API key
+openai_api_key = os.getenv("OPENAI_API_KEY", log_config.get('openai_api_key', 'YOUR_API_KEY'))
 qdrant_collection = log_config.get('qdrant_collection', 'agent_logs')
 
 log_handler = LogHandler(

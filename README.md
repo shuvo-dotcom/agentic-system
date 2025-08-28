@@ -77,6 +77,11 @@ The system follows a multi-agent architecture with the following key components:
    ```
 
 3. Set up environment variables:
+   - Copy the `.env.example` file to `.env`
+   ```bash
+   cp .env.example .env
+   ```
+   - Edit the `.env` file to add your OpenAI API key and other configuration settings:
    ```bash
    export OPENAI_API_KEY="your-openai-api-key"
    export OPENAI_API_BASE="https://api.openai.com/v1"  # Optional

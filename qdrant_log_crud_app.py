@@ -6,11 +6,12 @@ import os
 from agents.log_agent.log_handler import LogHandler
 import streamlit_mermaid as st_mermaid
 
-# Load config
+# Load config and environment variables
 with open(os.path.join('config', 'log_agent_settings.json'), 'r') as f:
     config = json.load(f)
 qdrant_url = config['qdrant_url']
-openai_api_key = config['openai_api_key']
+# Prioritize environment variable for API key
+openai_api_key = os.getenv("OPENAI_API_KEY", config.get('openai_api_key', 'YOUR_API_KEY'))
 collection_name = config.get('qdrant_collection', 'agent_logs')
 
 vector_store = QdrantVectorStore(qdrant_url, openai_api_key, collection_name=collection_name)

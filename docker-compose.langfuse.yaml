@@ -40,7 +40,7 @@ services:
       POSTGRES_PASSWORD: n8n
       POSTGRES_DB: langfuse
     ports:
-      - "5432:5432"
+      - "5433:5432"  # Changed from 5432 to 5433 to avoid port conflict
     volumes:
       - langfuse-db-data:/var/lib/postgresql/data
 

@@ -4,8 +4,9 @@ Configuration settings for the Agentic System.
 import os
 
 # OpenAI API Configuration
-OPENAI_API_KEY = "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"
-OPENAI_MODEL = "gpt-4o"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "YOUR_API_KEY")  # Get from environment or .env file
+OPENAI_MODEL = "gpt-4-turbo"
+OPENAI_PROJECT_ID = os.getenv("OPENAI_PROJECT_ID", "YOUR_PROJECT_ID")
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-ada-002")
 
 # Database Configuration

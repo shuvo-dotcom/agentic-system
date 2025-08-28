@@ -1,12 +1,13 @@
 {
   "provider": "openai",
   "openai": {
-    "api_key": "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",
-    "model": "gpt-4o-mini",
-    "api_base": "https://api.openai.com/v1"
+    "api_key": "YOUR_API_KEY",
+    "model": "gpt-4-turbo",
+    "api_base": "https://api.openai.com/v1",
+    "project_id": "YOUR_PROJECT_ID"
   },
   "anthropic": {
-    "api_key": "sk-ant-REPLACE_ME",
+    "api_key": "YOUR_ANTHROPIC_KEY",
     "model": "claude-3-opus-20240229",
     "api_base": "https://api.anthropic.com/v1"
   },
