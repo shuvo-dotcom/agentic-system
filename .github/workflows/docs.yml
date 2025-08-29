@@ -10,11 +10,19 @@ on:
       - '.nojekyll'
       - '.github/workflows/docs.yml'
 
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -42,7 +50,6 @@ jobs:
           pip install pymdown-extensions
           pip install mkdocs-minify-plugin
           pip install mkdocs-git-revision-date-localized-plugin
-          pip install mike
 
       - name: Configure Git user
         run: |
@@ -59,20 +66,49 @@ jobs:
           ls -la site/stylesheets/ || echo "No stylesheets directory"
           ls -la site/javascripts/ || echo "No javascripts directory"
 
+      # Create custom MkDocs config that excludes workenv
+      - name: Create custom config
+        run: |
+          # Make a copy of mkdocs.yml
+          cp mkdocs.yml mkdocs.custom.yml
+          # Add exclude patterns
+          echo "exclude_patterns: [workenv/*, '*/__pycache__/*']" >> mkdocs.custom.yml
+          cat mkdocs.custom.yml
+          
       - name: Build documentation
         run: |
-          # Build the site
-          mkdocs build --verbose
+          # Build the site with custom config
+          mkdocs build --verbose --config-file mkdocs.custom.yml
           
       - name: Ensure .nojekyll exists
         run: |
           # Make sure .nojekyll exists in the site directory
           touch site/.nojekyll
           echo "Created .nojekyll file in the build directory"
+          ls -la site/
           
-      - name: Deploy documentation
+      - name: Remove any virtual environment references
         run: |
-          # Deploy to GitHub Pages
-          mkdocs gh-deploy --force --verbose
-          # Output deployment status
-          echo "Deployment completed. Site should be available at https://shuvo-dotcom.github.io/agentic-system/"
+          # Remove workenv directory if it somehow got copied
+          rm -rf site/workenv/ || true
+          find site -name "__pycache__" -type d -exec rm -rf {} +  || true
+      
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+        
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: 'site'
+          
+  # Deployment job
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
