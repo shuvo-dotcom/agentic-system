@@ -41,11 +41,22 @@ jobs:
           pip install pymdown-extensions
           pip install mkdocs-minify-plugin
           pip install mkdocs-git-revision-date-localized-plugin
+          pip install mike
 
       - name: Configure Git user
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          
+      - name: Build site
+        run: mkdocs build --verbose
+        
+      - name: List build directory
+        run: |
+          ls -la site/
+          ls -la site/assets/ || echo "No assets directory"
+          ls -la site/stylesheets/ || echo "No stylesheets directory"
+          ls -la site/javascripts/ || echo "No javascripts directory"
 
       - name: Deploy documentation
-        run: mkdocs gh-deploy --force
+        run: mkdocs gh-deploy --force --verbose
