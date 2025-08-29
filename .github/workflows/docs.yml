@@ -56,16 +56,6 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-      - name: Build site
-        run: mkdocs build --verbose
-        
-      - name: List build directory
-        run: |
-          ls -la site/
-          ls -la site/assets/ || echo "No assets directory"
-          ls -la site/stylesheets/ || echo "No stylesheets directory"
-          ls -la site/javascripts/ || echo "No javascripts directory"
-
       # Create custom MkDocs config that excludes workenv
       - name: Create custom config
         run: |
@@ -77,8 +67,18 @@ jobs:
           
       - name: Build documentation
         run: |
+          # Clean any previous build
+          rm -rf site || true
           # Build the site with custom config
           mkdocs build --verbose --config-file mkdocs.custom.yml
+          
+      - name: Verify assets
+        run: |
+          echo "Checking assets directory..."
+          ls -la site/assets/
+          echo "Checking logo file specifically..."
+          ls -la site/assets/logo.png || echo "Logo file not found"
+          file site/assets/logo.png || echo "Logo file not found or invalid"
           
       - name: Ensure .nojekyll exists
         run: |
@@ -92,6 +92,32 @@ jobs:
           # Remove workenv directory if it somehow got copied
           rm -rf site/workenv/ || true
           find site -name "__pycache__" -type d -exec rm -rf {} +  || true
+      
+      - name: Ensure assets are properly handled
+        run: |
+          # Make sure the assets directory is properly included
+          echo "Checking if assets directory exists..."
+          if [ ! -d "site/assets" ]; then
+            echo "Creating assets directory..."
+            mkdir -p site/assets
+          fi
+          
+          # Verify the logo is in place
+          echo "Checking if logo exists..."
+          if [ ! -f "site/assets/logo.png" ]; then
+            echo "Copying logo from docs/assets to site/assets..."
+            cp docs/assets/logo.png site/assets/logo.png
+          fi
+          
+          # Verify the favicon is in place
+          echo "Checking if favicon exists..."
+          if [ ! -f "site/assets/favicon.png" ]; then
+            echo "Copying favicon from docs/assets to site/assets..."
+            cp docs/assets/favicon.png site/assets/favicon.png
+          fi
+          
+          # List contents of assets directory
+          ls -la site/assets/
       
       - name: Setup Pages
         uses: actions/configure-pages@v4
