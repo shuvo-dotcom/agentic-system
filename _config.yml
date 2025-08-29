@@ -1,0 +1,11 @@
+# This is a GitHub Pages configuration file
+
+theme: jekyll-theme-minimal
+include:
+  - "_*.html"
+  - "*.html"
+  - "**/*.html"
+  - "**/*.js"
+  - "**/*.css"
+  - "**/*.png"
+  - "**/*.svg"

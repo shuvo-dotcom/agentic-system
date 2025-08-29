@@ -59,4 +59,8 @@ jobs:
           ls -la site/javascripts/ || echo "No javascripts directory"
 
       - name: Deploy documentation
-        run: mkdocs gh-deploy --force --verbose
+        run: |
+          # Ensure GitHub Pages branch has content
+          mkdocs gh-deploy --force --verbose
+          # Output deployment status
+          echo "Deployment completed. Site should be available at https://shuvo-dotcom.github.io/agentic-system/"
