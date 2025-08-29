@@ -1,0 +1,116 @@
+site_name: Agentic System Documentation
+site_url: https://shuvo-dotcom.github.io/agentic-system/
+site_author: Agentic System Team
+site_description: Multi-agent system for energy sector analysis, calculations, and reporting
+
+# Repository
+repo_name: agentic-system
+repo_url: https://github.com/shuvo-dotcom/agentic-system
+edit_uri: edit/main/docs/
+
+# Copyright
+copyright: Copyright &copy; 2023 - 2025
+
+# Configuration
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.annotation
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  favicon: assets/favicon.png
+  logo: assets/logo.png
+
+# Extensions
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - meta
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.caret
+  - pymdownx.critic
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+  - tables
+  - toc:
+      permalink: true
+
+# Navigation
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Overview: getting-started/index.md
+      - Introduction: getting-started/introduction.md
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+  - Configuration:
+      - Overview: configuration/index.md
+      - LLM Configuration: configuration/llm.md
+      - Database Configuration: configuration/database.md
+  - Self-Healing Queries: self_healing_queries.md
+  - Troubleshooting:
+      - Overview: troubleshooting/index.md
+      - Installation Issues: troubleshooting/installation_issues.md
+      - FAQs: troubleshooting/faqs.md
+
+# Extra
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/shuvo-dotcom/agentic-system
+    - icon: fontawesome/solid/globe
+      link: https://shuvo-dotcom.github.io
+
+# CSS & Javascript
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js

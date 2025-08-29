@@ -1,0 +1,134 @@
+/* Custom styles for Agentic System documentation */
+
+/* Improve code block appearance */
+.md-typeset code {
+  font-size: 0.9em;
+}
+
+/* Custom admonition for energy calculations */
+:root {
+  --md-admonition-icon--energy: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M11 15H6l7-14v8h5L11 23z"/></svg>')
+}
+
+.md-typeset .admonition.energy,
+.md-typeset details.energy {
+  border-color: rgb(255, 197, 0);
+}
+
+.md-typeset .energy > .admonition-title,
+.md-typeset .energy > summary {
+  background-color: rgba(255, 197, 0, 0.1);
+}
+
+.md-typeset .energy > .admonition-title::before,
+.md-typeset .energy > summary::before {
+  background-color: rgb(255, 197, 0);
+  -webkit-mask-image: var(--md-admonition-icon--energy);
+  mask-image: var(--md-admonition-icon--energy);
+}
+
+/* Adjust table styling */
+.md-typeset table:not([class]) {
+  font-size: 0.65rem;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Main heading styling */
+.md-typeset h1 {
+  color: #2c3e50;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+/* Better anchor links */
+.headerlink {
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+h1:hover .headerlink,
+h2:hover .headerlink,
+h3:hover .headerlink,
+h4:hover .headerlink,
+h5:hover .headerlink,
+h6:hover .headerlink {
+  opacity: 1;
+}
+
+/* Logo and site title adjustments */
+.md-header__title {
+  font-weight: 700;
+}
+
+/* Custom footer styling */
+.md-footer {
+  margin-top: 2rem;
+}
+
+/* Custom container for important information */
+.important-container {
+  background-color: #f8f9fa;
+  border-left: 4px solid #2c3e50;
+  padding: 1rem;
+  margin: 1.5rem 0;
+  border-radius: 0 4px 4px 0;
+}
+
+/* Hero section for landing page */
+.hero {
+  text-align: center;
+  padding: 3rem 1rem;
+  background: linear-gradient(90deg, #e0f7fa, #e8eaf6);
+  border-radius: 4px;
+  margin: 2rem 0;
+}
+
+.hero h1 {
+  font-size: 2.5rem;
+  color: #1a237e;
+  margin-bottom: 1rem;
+}
+
+.hero p {
+  font-size: 1.2rem;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+/* Cards for feature highlighting */
+.feature-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  justify-content: center;
+  margin: 2rem 0;
+}
+
+.feature-card {
+  flex: 1 1 300px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.feature-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.feature-card h3 {
+  margin-top: 0;
+  color: #1a237e;
+}
+
+/* Make blockquotes more visually distinct */
+.md-typeset blockquote {
+  border-left: 4px solid #9fa8da;
+  background-color: rgba(159, 168, 218, 0.1);
+  padding: 0.5rem 1rem;
+}
